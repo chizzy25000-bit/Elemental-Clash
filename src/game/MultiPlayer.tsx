@@ -1,25 +1,41 @@
 import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { GameState, InputState, ElementType, Loadout } from '../shared';
+import { updateGameState } from '../gameLogic';
 import Renderer from './Renderer';
+import PauseMenu from '../components/PauseMenu';
 import Lobby from '../components/Lobby';
 import Builder from '../components/Builder';
 import AlchemyForge from '../components/AlchemyForge';
 import { CustomElement } from '../shared';
+import { useAuth } from '../contexts/AuthContext';
+import GeminiAIController from './GeminiAIController';
 
 export default function MultiPlayer({ action, roomCode, onExit }: { action: 'host' | 'join', roomCode?: string, onExit: () => void }) {
+  const { user } = useAuth();
   const [inLobby, setInLobby] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
   const [showForge, setShowForge] = useState(false);
+  const [showPause, setShowPause] = useState(false);
   const [initialCoins, setInitialCoins] = useState(0);
   const lastCoinsRef = useRef(0);
-  const [gameState, setGameState] = useState<GameState>({ players: {}, projectiles: {}, enemies: {}, lootOrbs: {}, floatingTexts: {} });
+  const [gameState, setGameState] = useState<GameState>({ players: {}, projectiles: {}, enemies: {}, lootOrbs: {}, floatingTexts: {}, customElements: {}, hazards: {}, bosses: {}, impactDecals: {}, tiles: {} });
   const [myId, setMyId] = useState<string>('');
   const [currentRoomCode, setCurrentRoomCode] = useState<string>('');
   const [isHost, setIsHost] = useState<boolean>(false);
+  const isHostRef = useRef(false);
+  const userRef = useRef(user);
+  
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
   const [error, setError] = useState<string>('');
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<InputState>({ dx: 0, dy: 0, aimX: 0, aimY: 0, isShooting: false });
+  const lastShotsRef = useRef(new Map<string, number>());
+  const lastUltimatesRef = useRef(new Map<string, number>());
+  const inputsRef = useRef<Map<string, InputState>>(new Map());
+  const myIdRef = useRef<string>('');
 
   const getHostToken = () => {
     let token = localStorage.getItem('elemental_clash_host_token');
@@ -46,18 +62,36 @@ export default function MultiPlayer({ action, roomCode, onExit }: { action: 'hos
     socketRef.current = socket;
 
     const globalCoins = parseInt(localStorage.getItem('elemental_clash_global_coins') || '500', 10);
+    const cloudInventory = JSON.parse(localStorage.getItem('elemental_clash_cloud_inventory') || '[]');
+    const cloudLoadout = JSON.parse(localStorage.getItem('elemental_clash_cloud_loadout') || '{"attack":null,"defense":null,"mobility":null,"healing":null,"ultimate":null}');
+    const cloudCustomElements = JSON.parse(localStorage.getItem('elemental_clash_cloud_custom_elements') || '{}');
 
     if (action === 'host') {
-      socket.emit('create_room', { coins: globalCoins, hostToken: getHostToken() });
+      socket.emit('create_room', { 
+        coins: globalCoins, 
+        hostToken: getHostToken(),
+        inventory: cloudInventory,
+        loadout: cloudLoadout,
+        customElements: cloudCustomElements
+      });
     } else if (action === 'join' && roomCode) {
-      socket.emit('join_room', { code: roomCode, coins: globalCoins, hostToken: getHostToken() });
+      socket.emit('join_room', { 
+        code: roomCode, 
+        coins: globalCoins, 
+        hostToken: getHostToken(),
+        inventory: cloudInventory,
+        loadout: cloudLoadout,
+        customElements: cloudCustomElements
+      });
     }
 
     socket.on('room_joined', ({ code, id, coins, isHost }) => {
       setCurrentRoomCode(code);
       setMyId(id);
+      myIdRef.current = id;
       setInitialCoins(coins);
       setIsHost(isHost);
+      isHostRef.current = isHost;
       lastCoinsRef.current = coins;
     });
 
@@ -65,33 +99,146 @@ export default function MultiPlayer({ action, roomCode, onExit }: { action: 'hos
       setError(msg);
     });
 
+    socket.on('pause_state', (isPaused: boolean) => {
+      setShowPause(isPaused);
+    });
+
+    socket.on('player_input', ({ id, input }: { id: string, input: InputState }) => {
+      inputsRef.current.set(id, input);
+    });
+
     socket.on('state', (state: GameState) => {
-      setGameState(state);
+      // Only non-hosts should overwrite their entire state from the server
+      // Hosts are the source of truth
+      if (!isHostRef.current) {
+        setGameState(state);
+      }
       
-      // Sync global coins
-      if (myId && state.players[myId] && state.players[myId].coins !== lastCoinsRef.current) {
-        lastCoinsRef.current = state.players[myId].coins;
-        window.dispatchEvent(new CustomEvent('coins_changed', { detail: state.players[myId].coins }));
+      // Sync global coins and cloud data
+      if (myIdRef.current && state.players[myIdRef.current]) {
+        const p = state.players[myIdRef.current];
+        let changed = false;
+
+        if (p.coins !== lastCoinsRef.current) {
+          lastCoinsRef.current = p.coins;
+          setInitialCoins(p.coins);
+          window.dispatchEvent(new CustomEvent('coins_changed', { detail: p.coins }));
+          changed = true;
+        }
+
+        if (userRef.current) {
+          const localInv = JSON.stringify(p.inventory);
+          const cloudInv = localStorage.getItem('elemental_clash_cloud_inventory');
+          if (localInv !== cloudInv) {
+            localStorage.setItem('elemental_clash_cloud_inventory', localInv);
+            changed = true;
+          }
+
+          const localLoadout = JSON.stringify(p.loadout);
+          const cloudLoadout = localStorage.getItem('elemental_clash_cloud_loadout');
+          if (localLoadout !== cloudLoadout) {
+            localStorage.setItem('elemental_clash_cloud_loadout', localLoadout);
+            changed = true;
+          }
+
+          const localCE = JSON.stringify(state.customElements);
+          const cloudCE = localStorage.getItem('elemental_clash_cloud_custom_elements');
+          if (localCE !== cloudCE) {
+            localStorage.setItem('elemental_clash_cloud_custom_elements', localCE);
+            changed = true;
+          }
+
+          if (changed) {
+            window.dispatchEvent(new CustomEvent('sync_to_cloud'));
+          }
+        }
       }
     });
 
-    // Send inputs to server at 30fps
+    // Local Game Loop (60fps)
+    let lastTime = Date.now();
+    const TICK_RATE = 1000 / 60;
     const intervalId = setInterval(() => {
-      if (socket.connected && !inLobbyRef.current && !showBuilderRef.current && !showForgeRef.current) {
-        socket.emit('input', inputRef.current);
+      if (inLobbyRef.current || showBuilderRef.current || showForgeRef.current || showPause) {
+        lastTime = Date.now();
+        return;
       }
-    }, 1000 / 30);
+
+      const now = Date.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      // Local simulation
+      setGameState(prevState => {
+        // Deep clone top-level objects to trigger React re-render
+        const nextState: GameState = { 
+          ...prevState,
+          players: { ...prevState.players },
+          projectiles: { ...prevState.projectiles },
+          enemies: { ...prevState.enemies },
+          bosses: { ...prevState.bosses },
+          lootOrbs: { ...prevState.lootOrbs },
+          floatingTexts: { ...prevState.floatingTexts },
+          hazards: { ...prevState.hazards },
+          impactDecals: { ...prevState.impactDecals }
+        };
+        
+        // Update inputs with our own local input
+        if (myIdRef.current) {
+          inputsRef.current.set(myIdRef.current, inputRef.current);
+        }
+        
+        // Run game logic locally
+        updateGameState(nextState, inputsRef.current, lastShotsRef.current, lastUltimatesRef.current, now, dt, true, myIdRef.current);
+        
+        // If Host, sync to server
+        if (isHostRef.current && socket.connected) {
+          socket.emit('sync_state', nextState);
+        } else if (socket.connected) {
+          // If not Host, just send our input (server will relay it)
+          socket.emit('input', inputRef.current);
+        }
+
+        return nextState;
+      });
+    }, TICK_RATE);
 
     return () => {
       clearInterval(intervalId);
       socket.disconnect();
     };
-  }, [action, roomCode]); // Run when action or roomCode changes
+  }, [action, roomCode]); // Removed isHost and myId to prevent infinite reconnects
+
+  // Local orb collection for instant feedback
+  useEffect(() => {
+    if (!socketRef.current || !gameState.players[myId]) return;
+    const myPlayer = gameState.players[myId];
+
+    Object.values(gameState.lootOrbs).forEach((orb: any) => {
+      const dist = Math.hypot(myPlayer.x - orb.x, myPlayer.y - orb.y);
+      if (dist < 30) {
+        // Optimistic local pickup
+        myPlayer.coins += orb.coins;
+        delete gameState.lootOrbs[orb.id];
+        socketRef.current?.emit('collect_orb', orb.id);
+      }
+    });
+  }, [gameState, myId]);
 
   const handleSpawn = (pvePenalty: number, pvpPenalty: number) => {
     if (socketRef.current) {
       const globalCoins = parseInt(localStorage.getItem('elemental_clash_global_coins') || '500', 10);
-      socketRef.current.emit('spawn', { pvePenalty, pvpPenalty, coins: globalCoins });
+      const cloudInventory = JSON.parse(localStorage.getItem('elemental_clash_cloud_inventory') || '[]');
+      const cloudLoadout = JSON.parse(localStorage.getItem('elemental_clash_cloud_loadout') || '{"attack":null,"defense":null,"mobility":null,"healing":null,"ultimate":null}');
+      
+      socketRef.current.emit('spawn', { 
+        pvePenalty, 
+        pvpPenalty, 
+        coins: globalCoins,
+        inventory: cloudInventory,
+        loadout: cloudLoadout,
+        displayName: user?.displayName || `Player ${myId.substring(0, 4)}`
+      });
     }
     setInLobby(false);
   };
@@ -108,9 +255,15 @@ export default function MultiPlayer({ action, roomCode, onExit }: { action: 'hos
     }
   };
 
-  const handleForge = (newElement: CustomElement, cost: number) => {
+  const handleForge = (newElement: CustomElement, cost: number, consumedElements?: ElementType[]) => {
     if (socketRef.current) {
-      socketRef.current.emit('forge_element', { newElement, cost });
+      socketRef.current.emit('forge_element', { newElement, cost, consumedElements });
+    }
+  };
+
+  const handleTogglePause = () => {
+    if (socketRef.current) {
+      socketRef.current.emit('toggle_pause');
     }
   };
 
@@ -150,23 +303,40 @@ export default function MultiPlayer({ action, roomCode, onExit }: { action: 'hos
   }
 
   if (inLobby) {
-    return <Lobby mode="multi" initialCoins={initialCoins} roomCode={currentRoomCode} isHost={isHost} onSpawn={handleSpawn} onExit={onExit} onDeleteServer={handleDeleteServer} />;
+    return <Lobby mode="multi" players={gameState.players} initialCoins={initialCoins} roomCode={currentRoomCode} isHost={isHost} onSpawn={handleSpawn} onExit={onExit} onDeleteServer={handleDeleteServer} />;
   }
 
   const player = gameState.players[myId];
 
+  const handleEnemyIntent = (enemyId: string, intent: any) => {
+    socketRef.current?.emit('enemy_intent', { enemyId, intent });
+  };
+
   return (
     <>
+      <GeminiAIController 
+        gameState={gameState} 
+        onIntent={handleEnemyIntent} 
+        isActive={isHost && !showPause && !showBuilder && !showForge} 
+      />
       <Renderer 
         gameState={gameState} 
         myId={myId} 
         onInput={(input) => { inputRef.current = input; }} 
         onExit={onExit} 
+        onPause={isHost ? handleTogglePause : undefined}
         onOpenBuilder={() => setShowBuilder(true)}
         isBuilderOpen={showBuilder}
         onOpenForge={() => setShowForge(true)}
         isForgeOpen={showForge}
       />
+      {showPause && (
+        <PauseMenu 
+          onResume={isHost ? handleTogglePause : undefined}
+          onExit={onExit}
+          isHost={isHost}
+        />
+      )}
       {showBuilder && player && (
         <Builder 
           coins={player.coins}

@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'coins', 'inventory']) &&
+             data.uid == request.auth.uid &&
+             data.coins is int && data.coins >= 0 &&
+             data.inventory is list && data.inventory.size() <= 100;
+    }
+
+    function isValidCustomElement(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'color', 'tier', 'baseType']) &&
+             data.id is string &&
+             data.ownerId == request.auth.uid &&
+             data.name is string && data.name.size() <= 50 &&
+             data.color is string &&
+             data.tier is int && data.tier >= 1 && data.tier <= 20 &&
+             data.baseType in ['fire', 'water', 'earth', 'air', 'void'];
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && isValidUserProfile(request.resource.data);
+      allow update: if isOwner(uid) && isValidUserProfile(request.resource.data) &&
+                      request.resource.data.uid == resource.data.uid;
+      
+      match /customElements/{elementId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidCustomElement(request.resource.data);
+        allow update: if isOwner(uid) && isValidCustomElement(request.resource.data) &&
+                        request.resource.data.id == resource.data.id &&
+                        request.resource.data.ownerId == resource.data.ownerId;
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    match /{path=**} {
+      allow read, write: if isAuthenticated() && 
+        (request.auth.token.email == "chizzy25000@gmail.com" && request.auth.token.email_verified == true);
+    }
+  }
+}

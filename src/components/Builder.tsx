@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ElementType, Loadout, CustomElement } from '../shared';
+import { ELEMENT_COLORS } from '../gameLogic';
+import Tooltip from './Tooltip';
 
 interface Props {
   coins: number;
@@ -11,11 +13,11 @@ interface Props {
   customElements?: Record<string, CustomElement>;
 }
 
-const ELEMENTS: { id: ElementType; name: string; color: string; cost: number }[] = [
-  { id: 'fire', name: 'Fire', color: 'bg-red-500', cost: 100 },
-  { id: 'water', name: 'Water', color: 'bg-blue-500', cost: 100 },
-  { id: 'earth', name: 'Earth', color: 'bg-emerald-600', cost: 100 },
-  { id: 'air', name: 'Air', color: 'bg-slate-300', cost: 100 },
+const ELEMENTS: { id: ElementType; name: string; color: string; cost: number; tier: number }[] = [
+  { id: 'fire', name: 'Fire', color: ELEMENT_COLORS.fire, cost: 100, tier: 1 },
+  { id: 'water', name: 'Water', color: ELEMENT_COLORS.water, cost: 100, tier: 1 },
+  { id: 'earth', name: 'Earth', color: ELEMENT_COLORS.earth, cost: 100, tier: 1 },
+  { id: 'air', name: 'Air', color: ELEMENT_COLORS.air, cost: 100, tier: 1 },
 ];
 
 const SLOTS: { id: keyof Loadout; name: string }[] = [
@@ -73,11 +75,20 @@ export default function Builder({ coins, inventory, loadout, onBuy, onEquip, onC
 
   const getElementDetails = (id: ElementType) => {
     const base = ELEMENTS.find(e => e.id === id);
-    if (base) return { ...base, tier: 1 };
+    if (base) return { ...base };
     const custom = customElements[id];
-    if (custom) return { id: custom.id, name: custom.name, color: custom.color, cost: 0, tier: custom.tier };
+    if (custom) return { id: custom.id, name: custom.name, color: custom.color, cost: 0, tier: custom.tier, rarity: custom.rarity, themeDescription: custom.themeDescription };
     return null;
   };
+
+  const renderTooltip = (el: { id: ElementType; name: string; color: string; tier: number; rarity?: string; themeDescription?: string }) => (
+    <div className="flex flex-col gap-1">
+      <div className="font-bold text-white text-lg">{el.name}</div>
+      <div className="text-xs text-purple-300">Tier {el.tier}</div>
+      {el.rarity && <div className="text-xs text-pink-300 capitalize">{el.rarity}</div>}
+      {el.themeDescription && <div className="text-xs text-slate-400 italic mt-1">"{el.themeDescription}"</div>}
+    </div>
+  );
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -118,34 +129,38 @@ export default function Builder({ coins, inventory, loadout, onBuy, onEquip, onC
                   const isSelected = selectedElement === el.id;
                   
                   return (
-                    <div 
-                      key={el.id} 
-                      onClick={() => handleElementClick(el.id)}
-                      className={`bg-slate-800/60 border rounded-xl p-4 flex flex-col items-center gap-3 transition-transform hover:scale-105 ${isSelected ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700'}`}
-                    >
-                      <div 
-                        className={`w-16 h-16 rounded-2xl shadow-lg flex items-center justify-center text-2xl font-black text-white/90 ${el.color} ${owned ? 'cursor-grab active:cursor-grabbing ring-2 ring-white/50' : 'opacity-50 grayscale'} ${isSelected ? 'ring-4 ring-blue-400' : ''}`}
-                        draggable={!isTouch && owned}
-                        onDragStart={(e) => !isTouch && owned && handleDragStart(e, el.id)}
-                      >
-                        {el.name[0]}
-                      </div>
-                      <div className="text-center">
-                        <div className="font-bold text-slate-200">{el.name}</div>
-                        {!owned ? (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); onBuy(el.id); }}
-                            disabled={!canAfford}
-                            className={`mt-2 px-4 py-1.5 rounded-lg text-sm font-bold transition-colors ${canAfford ? 'bg-yellow-500 hover:bg-yellow-400 text-yellow-950' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
+                    <div key={el.id}>
+                      <Tooltip content={renderTooltip(el)}>
+                        <div 
+                          onClick={() => handleElementClick(el.id)}
+                          className={`bg-slate-800/60 border rounded-xl p-4 flex flex-col items-center gap-3 transition-transform hover:scale-105 ${isSelected ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700'}`}
+                        >
+                          <div 
+                            className={`w-16 h-16 rounded-2xl shadow-lg flex items-center justify-center text-2xl font-black text-white/90 ${owned ? 'cursor-grab active:cursor-grabbing ring-2 ring-white/50' : 'opacity-50 grayscale'} ${isSelected ? 'ring-4 ring-blue-400' : ''}`}
+                            style={{ backgroundColor: el.color }}
+                            draggable={!isTouch && owned}
+                            onDragStart={(e) => !isTouch && owned && handleDragStart(e, el.id)}
                           >
-                            Buy ({el.cost})
-                          </button>
-                        ) : (
-                          <div className="mt-2 px-4 py-1.5 rounded-lg text-sm font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                            Owned
+                            {el.name[0]}
                           </div>
-                        )}
-                      </div>
+                          <div className="text-center">
+                            <div className="font-bold text-slate-200">{el.name}</div>
+                            {!owned ? (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); onBuy(el.id); }}
+                                disabled={!canAfford}
+                                className={`mt-2 px-4 py-1.5 rounded-lg text-sm font-bold transition-colors ${canAfford ? 'bg-yellow-500 hover:bg-yellow-400 text-yellow-950' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
+                              >
+                                Buy ({el.cost})
+                              </button>
+                            ) : (
+                              <div className="mt-2 px-4 py-1.5 rounded-lg text-sm font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                Owned
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </Tooltip>
                     </div>
                   );
                 })}
@@ -163,25 +178,30 @@ export default function Builder({ coins, inventory, loadout, onBuy, onEquip, onC
                     const owned = inventory.includes(el.id);
                     if (!owned) return null; // Only show owned custom elements
                     const isSelected = selectedElement === el.id;
+                    const details = getElementDetails(el.id);
                     
                     return (
-                      <div 
-                        key={el.id} 
-                        onClick={() => handleElementClick(el.id)}
-                        className={`bg-slate-800/60 border rounded-xl p-4 flex flex-col items-center gap-3 transition-transform hover:scale-105 ${isSelected ? 'border-purple-500 bg-purple-500/10' : 'border-purple-900/50'}`}
-                      >
+                    <div key={el.id}>
+                      <Tooltip content={details ? renderTooltip(details) : null}>
                         <div 
-                          className={`w-16 h-16 rounded-2xl shadow-lg flex items-center justify-center text-2xl font-black text-white/90 ${el.color} cursor-grab active:cursor-grabbing ring-2 ring-white/50 ${isSelected ? 'ring-4 ring-purple-400' : ''}`}
-                          draggable={!isTouch}
-                          onDragStart={(e) => !isTouch && handleDragStart(e, el.id)}
+                          onClick={() => handleElementClick(el.id)}
+                          className={`bg-slate-800/60 border rounded-xl p-4 flex flex-col items-center gap-3 transition-transform hover:scale-105 ${isSelected ? 'border-purple-500 bg-purple-500/10' : 'border-purple-900/50'}`}
                         >
-                          {el.name[0]}
+                          <div 
+                            className={`w-16 h-16 rounded-2xl shadow-lg flex items-center justify-center text-2xl font-black text-white/90 cursor-grab active:cursor-grabbing ring-2 ring-white/50 ${isSelected ? 'ring-4 ring-purple-400' : ''}`}
+                            style={{ backgroundColor: el.color }}
+                            draggable={!isTouch}
+                            onDragStart={(e) => !isTouch && handleDragStart(e, el.id)}
+                          >
+                            {el.name[0]}
+                          </div>
+                          <div className="text-center w-full">
+                            <div className="font-bold text-slate-200 truncate" title={el.name}>{el.name}</div>
+                            <div className="text-xs text-purple-400 mt-1">Tier {el.tier}</div>
+                          </div>
                         </div>
-                        <div className="text-center w-full">
-                          <div className="font-bold text-slate-200 truncate" title={el.name}>{el.name}</div>
-                          <div className="text-xs text-purple-400 mt-1">Tier {el.tier}</div>
-                        </div>
-                      </div>
+                      </Tooltip>
+                    </div>
                     );
                   })}
                 </div>
@@ -222,7 +242,10 @@ export default function Builder({ coins, inventory, loadout, onBuy, onEquip, onC
                     <div className="flex-1 flex justify-center">
                       {equippedEl ? (
                         <div className="flex items-center gap-4 bg-slate-800 border border-slate-600 rounded-xl p-2 pr-4 shadow-lg group">
-                          <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-xl font-black text-white/90 ${equippedEl.color}`}>
+                          <div 
+                            className="w-12 h-12 rounded-lg flex items-center justify-center text-xl font-black text-white/90"
+                            style={{ backgroundColor: equippedEl.color }}
+                          >
                             {equippedEl.name[0]}
                           </div>
                           <div className="flex flex-col">

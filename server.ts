@@ -17,10 +17,12 @@ async function startServer() {
   interface Room {
     id: string;
     hostToken: string;
+    hostSocketId: string;
     state: GameState;
     inputs: Map<string, InputState>;
     lastShots: Map<string, number>;
     lastUltimates: Map<string, number>;
+    isPaused: boolean;
     connectedSockets: Set<string>;
   }
 
@@ -38,16 +40,18 @@ async function startServer() {
   io.on('connection', (socket) => {
     console.log('Player connected:', socket.id);
 
-    socket.on('create_room', ({ coins, hostToken }: { coins: number, hostToken: string }) => {
+    socket.on('create_room', ({ coins, hostToken, inventory, loadout, customElements }: { coins: number, hostToken: string, inventory?: string[], loadout?: any, customElements?: any }) => {
       const code = generateRoomCode();
       console.log('Created room:', code);
       rooms.set(code, {
         id: code,
         hostToken,
-        state: { players: {}, projectiles: {}, enemies: {}, lootOrbs: {}, floatingTexts: {}, customElements: {} },
+        hostSocketId: socket.id,
+        state: { players: {}, projectiles: {}, enemies: {}, lootOrbs: {}, floatingTexts: {}, customElements: customElements || {}, hazards: {}, bosses: {}, impactDecals: {}, tiles: {} },
         inputs: new Map(),
         lastShots: new Map(),
         lastUltimates: new Map(),
+        isPaused: false,
         connectedSockets: new Set([socket.id])
       });
       socket.join(code);
@@ -55,16 +59,20 @@ async function startServer() {
       socket.emit('room_joined', { code, id: socket.id, coins, isHost: true });
     });
 
-    socket.on('join_room', ({ code, coins, hostToken }: { code: string, coins: number, hostToken: string }) => {
+    socket.on('join_room', ({ code, coins, hostToken, inventory, loadout, customElements }: { code: string, coins: number, hostToken: string, inventory?: string[], loadout?: any, customElements?: any }) => {
       console.log('Join room attempt:', code);
       code = code.toLowerCase();
-      console.log('Normalized code:', code);
-      console.log('Available rooms:', Array.from(rooms.keys()));
       const room = rooms.get(code);
       if (room) {
         room.connectedSockets.add(socket.id);
         socket.join(code);
         socketRooms.set(socket.id, code);
+        
+        // Merge custom elements
+        if (customElements) {
+          Object.assign(room.state.customElements, customElements);
+        }
+
         socket.emit('room_joined', { code, id: socket.id, coins, isHost: room.hostToken === hostToken });
       } else {
         socket.emit('room_error', 'Room not found');
@@ -82,7 +90,7 @@ async function startServer() {
       }
     });
 
-    socket.on('spawn', ({ pvePenalty, pvpPenalty, coins }) => {
+    socket.on('spawn', ({ pvePenalty, pvpPenalty, coins, inventory, loadout, displayName }) => {
       const roomId = socketRooms.get(socket.id);
       if (!roomId) return;
       const room = rooms.get(roomId);
@@ -90,15 +98,16 @@ async function startServer() {
 
       room.state.players[socket.id] = {
         id: socket.id,
-        x: Math.random() * 500 - 250,
-        y: Math.random() * 500 - 250,
+        displayName: displayName || `Player ${socket.id.substring(0, 4)}`,
+        x: 0,
+        y: 0,
         color: `hsl(${Math.random() * 360}, 80%, 60%)`,
         speed: 5,
         coins: coins,
         pvePenalty,
         pvpPenalty,
-        inventory: [],
-        loadout: { attack: null, defense: null, mobility: null, healing: null, ultimate: null },
+        inventory: inventory || [],
+        loadout: loadout || { attack: null, defense: null, mobility: null, healing: null, ultimate: null },
         hp: 100,
         maxHp: 100
       };
@@ -129,8 +138,8 @@ async function startServer() {
       }
     });
 
-    socket.on('forge_element', ({ newElement, cost }) => {
-      console.log('Received forge_element:', newElement.id, 'cost:', cost);
+    socket.on('forge_element', ({ newElement, cost, consumedElements }) => {
+      console.log('Received forge_element:', newElement.id, 'cost:', cost, 'consumed:', consumedElements);
       const roomId = socketRooms.get(socket.id);
       if (!roomId) return;
       const room = rooms.get(roomId);
@@ -139,12 +148,64 @@ async function startServer() {
       const player = room.state.players[socket.id];
       if (player && player.coins >= cost) {
         player.coins -= cost;
+        
+        // Remove consumed elements
+        if (consumedElements && Array.isArray(consumedElements)) {
+          consumedElements.forEach(id => {
+            const index = player.inventory.indexOf(id);
+            if (index !== -1) {
+              player.inventory.splice(index, 1);
+            }
+          });
+        }
+
         room.state.customElements[newElement.id] = newElement;
         player.inventory.push(newElement.id);
         console.log('Forged element added to room state:', newElement.id);
       } else {
         console.log('Forge failed: player not found or not enough coins', { playerCoins: player?.coins, cost });
       }
+    });
+
+    socket.on('collect_orb', (orbId: string) => {
+      const roomId = socketRooms.get(socket.id);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room) return;
+      
+      const orb = room.state.lootOrbs[orbId];
+      const player = room.state.players[socket.id];
+      if (orb && player) {
+        // Verify distance to prevent cheating (generous for latency)
+        const dist = Math.hypot(player.x - orb.x, player.y - orb.y);
+        if (dist < 150) {
+          player.coins += orb.coins;
+          delete room.state.lootOrbs[orbId];
+        }
+      }
+    });
+
+    socket.on('enemy_intent', ({ enemyId, intent }: { enemyId: string, intent: any }) => {
+      const roomId = socketRooms.get(socket.id);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room) return;
+      
+      const enemy = room.state.enemies[enemyId] || room.state.bosses[enemyId];
+      if (enemy) {
+        enemy.intent = intent;
+      }
+    });
+
+    socket.on('sync_state', (state: GameState) => {
+      const roomId = socketRooms.get(socket.id);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || room.hostSocketId !== socket.id) return;
+      
+      // Update server state and broadcast to all
+      room.state = state;
+      io.to(roomId).emit('state', state);
     });
 
     socket.on('input', (input: InputState) => {
@@ -154,6 +215,19 @@ async function startServer() {
       if (!room) return;
 
       room.inputs.set(socket.id, input);
+      
+      // Broadcast input to everyone else (for local simulation)
+      socket.to(roomId).emit('player_input', { id: socket.id, input });
+    });
+
+    socket.on('toggle_pause', () => {
+      const roomId = socketRooms.get(socket.id);
+      if (!roomId) return;
+      const room = rooms.get(roomId);
+      if (!room || room.hostSocketId !== socket.id) return;
+
+      room.isPaused = !room.isPaused;
+      io.to(roomId).emit('pause_state', room.isPaused);
     });
 
     socket.on('disconnect', () => {
@@ -175,14 +249,8 @@ async function startServer() {
     });
   });
 
-  // Server Game Loop (60fps)
-  setInterval(() => {
-    const now = Date.now();
-    for (const room of rooms.values()) {
-      updateGameState(room.state, room.inputs, room.lastShots, room.lastUltimates, now, true);
-      io.to(room.id).emit('state', room.state);
-    }
-  }, 1000 / 60);
+  // Server is now a pure relay, no game loop needed
+  // setInterval(() => { ... }, 1000 / 60);
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

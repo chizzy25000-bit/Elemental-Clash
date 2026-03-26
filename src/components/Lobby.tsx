@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { Player } from '../shared';
 
 interface Props {
   mode: 'single' | 'multi';
+  players?: Record<string, Player>;
   initialCoins: number;
   roomCode?: string;
   isHost?: boolean;
@@ -10,39 +12,53 @@ interface Props {
   onDeleteServer?: () => void;
 }
 
-export default function Lobby({ mode, initialCoins, roomCode, isHost, onSpawn, onExit, onDeleteServer }: Props) {
+export default function Lobby({ mode, players, initialCoins, roomCode, isHost, onSpawn, onExit, onDeleteServer }: Props) {
   const [pvePenalty, setPvePenalty] = useState(30);
   const [pvpPenalty, setPvpPenalty] = useState(40);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white font-sans relative overflow-hidden">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white font-sans relative overflow-hidden p-4">
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl"></div>
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl"></div>
 
-      <div className="z-10 flex flex-col items-center bg-slate-800/80 p-8 rounded-2xl border border-slate-600 shadow-2xl backdrop-blur-sm w-full max-w-md">
-        <h2 className="text-3xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-emerald-400">
-          High-Stakes Lobby
+      <div className="z-10 flex flex-col items-center bg-slate-800/80 p-8 rounded-2xl border border-slate-600 shadow-2xl backdrop-blur-sm w-full max-w-2xl overflow-y-auto max-h-[90vh]">
+        <h2 className="text-3xl font-black mb-6 text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-emerald-400">
+          Lobby
         </h2>
         
-        {roomCode && (
-          <div className="bg-slate-900/80 border border-emerald-500/30 px-6 py-3 rounded-xl mb-6 flex flex-col items-center">
-            <span className="text-slate-400 text-xs uppercase tracking-widest font-bold mb-1">Room Code</span>
-            <span className="text-3xl font-mono font-black tracking-widest text-emerald-400">{roomCode}</span>
-          </div>
-        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
+          <div className="space-y-6">
+            {roomCode && (
+              <div className="bg-slate-900/80 border border-emerald-500/30 px-6 py-3 rounded-xl flex flex-col items-center">
+                <span className="text-slate-400 text-xs uppercase tracking-widest font-bold mb-1">Room Code</span>
+                <span className="text-3xl font-mono font-black tracking-widest text-emerald-400">{roomCode}</span>
+              </div>
+            )}
 
-        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 w-full mb-6 flex flex-col items-center">
-          <span className="text-slate-400 text-sm uppercase tracking-wider font-bold mb-1">Current Balance</span>
-          <span className="text-4xl font-black text-yellow-400">{initialCoins} <span className="text-xl">Coins</span></span>
-          {initialCoins === 500 && (
-            <span className="text-emerald-400 text-xs mt-2 bg-emerald-400/10 px-2 py-1 rounded">New Player Grant Applied!</span>
+            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 w-full flex flex-col items-center">
+              <span className="text-slate-400 text-sm uppercase tracking-wider font-bold mb-1">Current Balance</span>
+              <span className="text-4xl font-black text-yellow-400">{initialCoins} <span className="text-xl">Coins</span></span>
+            </div>
+          </div>
+
+          {/* Players List */}
+          {mode === 'multi' && players && (
+            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 w-full">
+              <h3 className="font-bold text-slate-300 mb-2">Players</h3>
+              <div className="space-y-2">
+                {Object.values(players).map(player => (
+                  <div key={player.id} className="flex items-center gap-3 bg-slate-800 p-2 rounded-lg">
+                    <div className="w-8 h-8 rounded-full" style={{ backgroundColor: player.color }}></div>
+                    <span className="font-mono">👤 {player.displayName || player.id.substring(0, 5)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
-        <div className="w-full space-y-6 mb-8">
-          <button className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold transition-colors flex items-center justify-center gap-2">
-            <span className="text-xl">📺</span> Watch Ad for 1.5x Coin Multiplier
-          </button>
+        <div className="w-full space-y-6 mt-8 mb-8">
+          {/* ... (keep existing penalty sliders) */}
           <div>
             <div className="flex justify-between mb-2">
               <label className="font-bold text-slate-300">PvE Death Penalty</label>
@@ -58,7 +74,6 @@ export default function Lobby({ mode, initialCoins, roomCode, isHost, onSpawn, o
               onChange={(e) => setPvePenalty(parseInt(e.target.value))}
               className="w-full accent-orange-500"
             />
-            <p className="text-xs text-slate-500 mt-1">Minimum 30% coin loss when killed by environment/AI.</p>
           </div>
 
           {mode === 'multi' && (
@@ -77,7 +92,6 @@ export default function Lobby({ mode, initialCoins, roomCode, isHost, onSpawn, o
                 onChange={(e) => setPvpPenalty(parseInt(e.target.value))}
                 className="w-full accent-red-500"
               />
-              <p className="text-xs text-slate-500 mt-1">Minimum 40% coin loss when killed by players.</p>
             </div>
           )}
         </div>

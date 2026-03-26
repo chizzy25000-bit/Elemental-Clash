@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import SinglePlayer from './game/SinglePlayer';
 import MultiPlayer from './game/MultiPlayer';
 import ErrorBoundary from './components/ErrorBoundary';
-import DebugLogger from './components/DebugLogger';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { FirebaseSync } from './components/FirebaseSync';
+import { LogIn, LogOut, User as UserIcon } from 'lucide-react';
 
 interface World {
   id: string;
@@ -10,7 +12,8 @@ interface World {
   lastPlayed: number;
 }
 
-export default function App() {
+function AppContent() {
+  const { user, login, logout } = useAuth();
   const [mode, setMode] = useState<'menu' | 'sp_menu' | 'sp_play' | 'mp_menu' | 'mp_play'>('menu');
   const [spReset, setSpReset] = useState(false);
   const [selectedWorldId, setSelectedWorldId] = useState<string>('');
@@ -61,21 +64,51 @@ export default function App() {
     localStorage.removeItem(`elemental_clash_world_${id}`);
   };
 
-  if (mode === 'sp_play') return <ErrorBoundary><DebugLogger /><SinglePlayer worldId={selectedWorldId} reset={spReset} onExit={() => setMode('menu')} /></ErrorBoundary>;
-  if (mode === 'mp_play') return <ErrorBoundary><DebugLogger /><MultiPlayer action={mpAction} roomCode={mpCode} onExit={() => setMode('menu')} /></ErrorBoundary>;
+  if (mode === 'sp_play') return <ErrorBoundary><SinglePlayer worldId={selectedWorldId} reset={spReset} onExit={() => setMode('menu')} /></ErrorBoundary>;
+  if (mode === 'mp_play') return <ErrorBoundary><MultiPlayer action={mpAction} roomCode={mpCode} onExit={() => setMode('menu')} /></ErrorBoundary>;
 
   return (
     <ErrorBoundary>
-      <DebugLogger />
+      <FirebaseSync />
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white font-sans relative overflow-hidden">
-        {/* Coin Bar */}
-        <div className="absolute top-6 right-6 bg-slate-800/80 backdrop-blur border border-slate-600 rounded-xl p-3 px-5 text-white shadow-lg flex items-center gap-3 z-50">
-          <div className="w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center text-yellow-900 font-black text-lg shadow-[0_0_15px_rgba(250,204,21,0.5)]">
-            $
+        {/* Auth & Coin Bar */}
+        <div className="absolute top-6 right-6 flex items-center gap-4 z-50">
+          {/* User Profile */}
+          <div className="bg-slate-800/80 backdrop-blur border border-slate-600 rounded-xl p-2 px-4 text-white shadow-lg flex items-center gap-3">
+            {user ? (
+              <>
+                <div className="flex flex-col items-end">
+                  <span className="text-xs text-slate-400 font-bold uppercase tracking-wider leading-none mb-1">Account</span>
+                  <span className="text-sm font-black text-blue-400 leading-none truncate max-w-[120px]">{user.displayName || 'Player'}</span>
+                </div>
+                <button 
+                  onClick={() => logout()}
+                  className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors"
+                  title="Logout"
+                >
+                  <LogOut size={18} />
+                </button>
+              </>
+            ) : (
+              <button 
+                onClick={() => login()}
+                className="flex items-center gap-2 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold text-sm transition-colors"
+              >
+                <LogIn size={16} />
+                Login to Save
+              </button>
+            )}
           </div>
-          <div className="flex flex-col">
-            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider leading-none mb-1">Balance</span>
-            <span className="text-xl font-black text-yellow-400 leading-none">{coins}</span>
+
+          {/* Coins */}
+          <div className="bg-slate-800/80 backdrop-blur border border-slate-600 rounded-xl p-3 px-5 text-white shadow-lg flex items-center gap-3">
+            <div className="w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center text-yellow-900 font-black text-lg shadow-[0_0_15px_rgba(250,204,21,0.5)]">
+              $
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider leading-none mb-1">Balance</span>
+              <span className="text-xl font-black text-yellow-400 leading-none">{coins}</span>
+            </div>
           </div>
         </div>
 
@@ -91,7 +124,7 @@ export default function App() {
             Phase 1: Infinite World & Cross-Platform Controls
           </p>
           
-          <div className="flex flex-col gap-6 w-72">
+          <div className="flex flex-col gap-6 w-72 mt-8">
             {mode === 'menu' && (
               <>
                 <button 
@@ -200,5 +233,13 @@ export default function App() {
         </div>
       </div>
     </ErrorBoundary>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

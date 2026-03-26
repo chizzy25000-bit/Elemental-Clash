@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores persistent player data like coins and inventory.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "User's display name" },
+        "coins": { "type": "integer", "description": "Current coin balance" },
+        "inventory": { "type": "array", "items": { "type": "string" }, "description": "List of element IDs in inventory" },
+        "loadout": {
+          "type": "object",
+          "properties": {
+            "attack": { "type": "string" },
+            "defense": { "type": "string" },
+            "mobility": { "type": "string" },
+            "healing": { "type": "string" },
+            "ultimate": { "type": "string" }
+          }
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "coins", "inventory"]
+    },
+    "CustomElement": {
+      "title": "Custom Element",
+      "description": "Stores details of a forged element.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "tier": { "type": "integer" },
+        "baseType": { "type": "string", "enum": ["fire", "water", "earth", "air", "void"] },
+        "themeDescription": { "type": "string" },
+        "rarity": { "type": "string", "enum": ["common", "rare", "epic", "legendary"] },
+        "effectType": { "type": "string", "enum": ["sparkle", "trail", "pulse", "orbit", "none"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "name", "color", "tier", "baseType"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profile document"
+    },
+    "/users/{uid}/customElements/{elementId}": {
+      "schema": "CustomElement",
+      "description": "Custom elements owned by the user"
+    }
+  }
+}

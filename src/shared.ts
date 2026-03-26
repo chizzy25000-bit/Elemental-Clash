@@ -8,6 +8,7 @@ export interface CustomElement {
   baseType: 'fire' | 'water' | 'earth' | 'air' | 'void';
   themeDescription: string;
   rarity: 'common' | 'rare' | 'epic' | 'legendary';
+  effectType: 'sparkle' | 'trail' | 'pulse' | 'orbit' | 'none';
 }
 
 export interface Loadout {
@@ -20,6 +21,7 @@ export interface Loadout {
 
 export interface Player {
   id: string;
+  displayName?: string;
   x: number;
   y: number;
   color: string;
@@ -31,7 +33,10 @@ export interface Player {
   loadout: Loadout;
   hp: number;
   maxHp: number;
+  stunned?: number; // frames remaining
   lastUltimate?: number;
+  aura?: string; // Color of the aura
+  trailType?: 'sparkle' | 'trail' | 'pulse' | 'orbit' | 'none';
 }
 
 export interface Projectile {
@@ -44,6 +49,14 @@ export interface Projectile {
   life: number;
   element: ElementType | 'void';
   damage: number;
+  effectType?: 'sparkle' | 'trail' | 'pulse' | 'orbit' | 'none';
+}
+
+export interface EnemyIntent {
+  dx: number;
+  dy: number;
+  action: string;
+  timestamp: number;
 }
 
 export interface Enemy {
@@ -59,6 +72,8 @@ export interface Enemy {
   vx: number;
   vy: number;
   lastShot?: number;
+  intent?: EnemyIntent;
+  name?: string;
 }
 
 export interface LootOrb {
@@ -79,6 +94,40 @@ export interface FloatingText {
   maxLife: number;
 }
 
+export type HazardType = 'lava' | 'blizzard' | 'vines' | 'spikes';
+
+export interface Hazard {
+  id: string;
+  x: number;
+  y: number;
+  type: HazardType;
+  radius: number;
+  life: number;
+  maxLife: number;
+}
+
+export interface Boss extends Enemy {
+  isBoss: true;
+  name: string;
+  phase: number;
+  shieldElement?: ElementType;
+  shieldHp: number;
+  maxShieldHp: number;
+  lastAbility?: string;
+  abilityCooldown: number;
+}
+
+export interface ImpactDecal {
+  id: string;
+  x: number;
+  y: number;
+  color: string;
+  size: number;
+  life: number;
+  maxLife: number;
+  type: 'scorch' | 'ice' | 'impact';
+}
+
 export interface GameState {
   players: Record<string, Player>;
   projectiles: Record<string, Projectile>;
@@ -86,6 +135,10 @@ export interface GameState {
   lootOrbs: Record<string, LootOrb>;
   floatingTexts: Record<string, FloatingText>;
   customElements: Record<string, CustomElement>;
+  hazards: Record<string, Hazard>;
+  bosses: Record<string, Boss>;
+  impactDecals: Record<string, ImpactDecal>;
+  tiles: Record<string, string>; // "x,y" -> tileType
 }
 
 export interface InputState {
@@ -95,4 +148,8 @@ export interface InputState {
   aimY: number;
   isShooting: boolean;
   isUltimate?: boolean;
+  x?: number;
+  y?: number;
+  hp?: number;
+  coins?: number;
 }
