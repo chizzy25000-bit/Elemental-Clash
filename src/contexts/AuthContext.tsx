@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { auth, loginWithGoogle, logout } from '../firebase';
-import { initCrazyGames, crazyGamesLogin, addCrazyGamesAuthListener, removeCrazyGamesAuthListener } from '../lib/crazygames';
+import { initCrazyGames, crazyGamesLogin } from '../lib/crazygames';
 
 interface AuthContextType {
   user: User | any | null;
@@ -19,59 +19,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isCrazyGames, setIsCrazyGames] = useState(false);
 
   useEffect(() => {
-    let firebaseUnsubscribe: (() => void) | null = null;
-
-    const handleCrazyGamesUser = (cgUser: any) => {
-      if (cgUser && typeof cgUser.userId === 'string' && cgUser.userId.length > 0) {
-        setUser({
-          ...cgUser,
-          uid: cgUser.userId,
-          displayName: cgUser.username || 'Player'
-        });
-        setIsCrazyGames(true);
-        setLoading(false);
-      } else {
-        // If CrazyGames login fails or user logs out, fallback to Firebase
-        setIsCrazyGames(false);
-        if (!firebaseUnsubscribe) {
-          setupFirebaseListener();
-        }
-      }
-    };
-
-    const setupFirebaseListener = () => {
-      firebaseUnsubscribe = onAuthStateChanged(auth, (user) => {
-        setUser(user);
-        setLoading(false);
-      });
-    };
-
     const init = async () => {
       const sdk = await initCrazyGames();
       if (sdk) {
         setIsCrazyGames(true);
-        addCrazyGamesAuthListener(handleCrazyGamesUser);
-        
-        // Initial check
         const cgUser = await crazyGamesLogin();
-        if (cgUser) {
-          handleCrazyGamesUser(cgUser);
-        } else {
-          // If no user yet, we still wait for the listener but also setup Firebase just in case
-          setupFirebaseListener();
+        if (cgUser && typeof cgUser.userId === 'string' && cgUser.userId.length > 0) {
+          // Normalize CrazyGames user to have a 'uid' for Firestore sync
+          setUser({
+            ...cgUser,
+            uid: cgUser.userId,
+            displayName: cgUser.username || 'Player'
+          });
+          setLoading(false);
+          return;
         }
-      } else {
-        setupFirebaseListener();
       }
+
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (!isCrazyGames) {
+          setUser(user);
+        }
+        setLoading(false);
+      });
+      return unsubscribe;
     };
 
     init();
-
-    return () => {
-      if (firebaseUnsubscribe) firebaseUnsubscribe();
-      removeCrazyGamesAuthListener(handleCrazyGamesUser);
-    };
-  }, []);
+  }, [isCrazyGames]);
 
   const value = {
     user,
