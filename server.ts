@@ -99,17 +99,20 @@ async function startServer() {
       room.state.players[socket.id] = {
         id: socket.id,
         displayName: displayName || `Player ${socket.id.substring(0, 4)}`,
-        x: 0,
-        y: 0,
+        x: Math.random() * 500 - 250,
+        y: Math.random() * 500 - 250,
         color: `hsl(${Math.random() * 360}, 80%, 60%)`,
         speed: 5,
+        vx: 0,
+        vy: 0,
         coins: coins,
         pvePenalty,
         pvpPenalty,
         inventory: inventory || [],
         loadout: loadout || { attack: null, defense: null, mobility: null, healing: null, ultimate: null },
         hp: 100,
-        maxHp: 100
+        maxHp: 100,
+        statusEffects: []
       };
     });
 
@@ -167,47 +170,6 @@ async function startServer() {
       }
     });
 
-    socket.on('collect_orb', (orbId: string) => {
-      const roomId = socketRooms.get(socket.id);
-      if (!roomId) return;
-      const room = rooms.get(roomId);
-      if (!room) return;
-      
-      const orb = room.state.lootOrbs[orbId];
-      const player = room.state.players[socket.id];
-      if (orb && player) {
-        // Verify distance to prevent cheating (generous for latency)
-        const dist = Math.hypot(player.x - orb.x, player.y - orb.y);
-        if (dist < 150) {
-          player.coins += orb.coins;
-          delete room.state.lootOrbs[orbId];
-        }
-      }
-    });
-
-    socket.on('enemy_intent', ({ enemyId, intent }: { enemyId: string, intent: any }) => {
-      const roomId = socketRooms.get(socket.id);
-      if (!roomId) return;
-      const room = rooms.get(roomId);
-      if (!room) return;
-      
-      const enemy = room.state.enemies[enemyId] || room.state.bosses[enemyId];
-      if (enemy) {
-        enemy.intent = intent;
-      }
-    });
-
-    socket.on('sync_state', (state: GameState) => {
-      const roomId = socketRooms.get(socket.id);
-      if (!roomId) return;
-      const room = rooms.get(roomId);
-      if (!room || room.hostSocketId !== socket.id) return;
-      
-      // Update server state and broadcast to all
-      room.state = state;
-      io.to(roomId).emit('state', state);
-    });
-
     socket.on('input', (input: InputState) => {
       const roomId = socketRooms.get(socket.id);
       if (!roomId) return;
@@ -215,9 +177,6 @@ async function startServer() {
       if (!room) return;
 
       room.inputs.set(socket.id, input);
-      
-      // Broadcast input to everyone else (for local simulation)
-      socket.to(roomId).emit('player_input', { id: socket.id, input });
     });
 
     socket.on('toggle_pause', () => {
@@ -249,8 +208,20 @@ async function startServer() {
     });
   });
 
-  // Server is now a pure relay, no game loop needed
-  // setInterval(() => { ... }, 1000 / 60);
+  // Server Game Loop (60fps)
+  let lastTime = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+
+    for (const room of rooms.values()) {
+      if (!room.isPaused) {
+        updateGameState(room.state, room.inputs, room.lastShots, room.lastUltimates, now, dt, true);
+      }
+      io.to(room.id).emit('state', room.state);
+    }
+  }, 1000 / 60);
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

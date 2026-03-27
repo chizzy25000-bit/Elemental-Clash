@@ -1,5 +1,15 @@
 export type ElementType = 'fire' | 'water' | 'earth' | 'air' | string;
 
+export const getCoinsKey = (uid?: string) => uid ? `elemental_clash_coins_${uid}` : 'elemental_clash_global_coins';
+export const getInventoryKey = (uid?: string) => uid ? `elemental_clash_inventory_${uid}` : 'elemental_clash_cloud_inventory';
+export const getLoadoutKey = (uid?: string) => uid ? `elemental_clash_loadout_${uid}` : 'elemental_clash_cloud_loadout';
+export const getCustomElementsKey = (uid?: string) => uid ? `elemental_clash_custom_elements_${uid}` : 'elemental_clash_cloud_custom_elements';
+
+export interface StatusEffect {
+  type: 'burning' | 'poisoned' | 'slowed' | 'stunned';
+  duration: number; // frames
+}
+
 export interface CustomElement {
   id: string;
   name: string;
@@ -26,6 +36,8 @@ export interface Player {
   y: number;
   color: string;
   speed: number;
+  vx: number;
+  vy: number;
   coins: number;
   pvePenalty: number;
   pvpPenalty: number;
@@ -37,6 +49,8 @@ export interface Player {
   lastUltimate?: number;
   aura?: string; // Color of the aura
   trailType?: 'sparkle' | 'trail' | 'pulse' | 'orbit' | 'none';
+  statusEffects: StatusEffect[];
+  isDead?: boolean;
 }
 
 export interface Projectile {
@@ -52,13 +66,6 @@ export interface Projectile {
   effectType?: 'sparkle' | 'trail' | 'pulse' | 'orbit' | 'none';
 }
 
-export interface EnemyIntent {
-  dx: number;
-  dy: number;
-  action: string;
-  timestamp: number;
-}
-
 export interface Enemy {
   id: string;
   x: number;
@@ -72,8 +79,9 @@ export interface Enemy {
   vx: number;
   vy: number;
   lastShot?: number;
-  intent?: EnemyIntent;
-  name?: string;
+  statusEffects: StatusEffect[];
+  abilityCooldown?: number;
+  lastAbility?: number;
 }
 
 export interface LootOrb {
@@ -94,7 +102,7 @@ export interface FloatingText {
   maxLife: number;
 }
 
-export type HazardType = 'lava' | 'blizzard' | 'vines' | 'spikes';
+export type HazardType = 'lava' | 'blizzard' | 'vines' | 'spikes' | 'black_hole';
 
 export interface Hazard {
   id: string;
@@ -113,8 +121,9 @@ export interface Boss extends Enemy {
   shieldElement?: ElementType;
   shieldHp: number;
   maxShieldHp: number;
-  lastAbility?: string;
+  lastAbility?: number;
   abilityCooldown: number;
+  attackPattern: number;
 }
 
 export interface ImpactDecal {
@@ -125,7 +134,7 @@ export interface ImpactDecal {
   size: number;
   life: number;
   maxLife: number;
-  type: 'scorch' | 'ice' | 'impact';
+  type: 'scorch' | 'ice' | 'impact' | 'poison' | 'void';
 }
 
 export interface GameState {
@@ -148,8 +157,4 @@ export interface InputState {
   aimY: number;
   isShooting: boolean;
   isUltimate?: boolean;
-  x?: number;
-  y?: number;
-  hp?: number;
-  coins?: number;
 }

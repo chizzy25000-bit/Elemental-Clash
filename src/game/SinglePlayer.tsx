@@ -1,31 +1,35 @@
 import { useEffect, useState, useRef } from 'react';
+import { toast } from 'sonner';
 import { GameState, InputState, ElementType, Loadout } from '../shared';
-import { updateGameState } from '../gameLogic';
+import { updateGameState, dropLoot } from '../gameLogic';
 import Renderer from './Renderer';
 import PauseMenu from '../components/PauseMenu';
 import Lobby from '../components/Lobby';
 import Builder from '../components/Builder';
 import AlchemyForge from '../components/AlchemyForge';
-import { CustomElement } from '../shared';
+import { CustomElement, getInventoryKey, getLoadoutKey, getCustomElementsKey } from '../shared';
 import { useAuth } from '../contexts/AuthContext';
-import GeminiAIController from './GeminiAIController';
+import { useCoins } from '../contexts/CoinContext';
+import { gameplayStart, gameplayStop, happyTime, requestAd } from '../lib/crazygames';
 
 export default function SinglePlayer({ worldId, reset, onExit }: { worldId: string, reset?: boolean, onExit: () => void }) {
-  const { user } = useAuth();
+  const { user, isCrazyGames } = useAuth();
+  const { coins, setCoins, spendCoins, addCoins } = useCoins();
   const [inLobby, setInLobby] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
   const [showForge, setShowForge] = useState(false);
   const [showPause, setShowPause] = useState(false);
-  const [initialCoins, setInitialCoins] = useState(500);
-  const lastCoinsRef = useRef(500);
+  const [adLoading, setAdLoading] = useState(false);
   const [gameState, setGameState] = useState<GameState>({ players: {}, projectiles: {}, enemies: {}, lootOrbs: {}, floatingTexts: {}, customElements: {}, hazards: {}, bosses: {}, impactDecals: {}, tiles: {} });
   const stateRef = useRef<GameState>({
     players: {
       'local': { 
-        id: 'local', x: 0, y: 0, color: '#3b82f6', speed: 5, coins: 500, pvePenalty: 30, pvpPenalty: 0,
+        id: 'local', x: 0, y: 0, color: '#3b82f6', speed: 5, vx: 0, vy: 0, coins: coins, pvePenalty: 30, pvpPenalty: 0,
         inventory: [],
         loadout: { attack: null, defense: null, mobility: null, healing: null, ultimate: null },
-        hp: 100, maxHp: 100
+        hp: 100, maxHp: 100,
+        statusEffects: [],
+        isDead: false
       }
     },
     projectiles: {},
@@ -43,23 +47,21 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
   const lastUltimatesRef = useRef(new Map<string, number>());
 
   useEffect(() => {
-    const globalCoins = parseInt(localStorage.getItem('elemental_clash_global_coins') || '500', 10);
-    setInitialCoins(globalCoins);
-    lastCoinsRef.current = globalCoins;
-
     if (reset) {
       localStorage.removeItem(`elemental_clash_world_${worldId}`);
       
       // If logged in, use cloud data as base
-      const cloudInventory = user ? JSON.parse(localStorage.getItem('elemental_clash_cloud_inventory') || '[]') : [];
-      const cloudLoadout = user ? JSON.parse(localStorage.getItem('elemental_clash_cloud_loadout') || '{"attack":null,"defense":null,"mobility":null,"healing":null,"ultimate":null}') : { attack: null, defense: null, mobility: null, healing: null, ultimate: null };
-      const cloudCustomElements = user ? JSON.parse(localStorage.getItem('elemental_clash_cloud_custom_elements') || '{}') : {};
+      const cloudInventory = user ? JSON.parse(localStorage.getItem(getInventoryKey(user.uid)) || '[]') : [];
+      const cloudLoadout = user ? JSON.parse(localStorage.getItem(getLoadoutKey(user.uid)) || '{"attack":null,"defense":null,"mobility":null,"healing":null,"ultimate":null}') : { attack: null, defense: null, mobility: null, healing: null, ultimate: null };
+      const cloudCustomElements = user ? JSON.parse(localStorage.getItem(getCustomElementsKey(user.uid)) || '{}') : {};
 
       stateRef.current.players['local'] = {
-        id: 'local', x: 0, y: 0, color: '#3b82f6', speed: 5, coins: globalCoins, pvePenalty: 30, pvpPenalty: 0,
+        id: 'local', x: 0, y: 0, color: '#3b82f6', speed: 5, vx: 0, vy: 0, coins: coins, pvePenalty: 30, pvpPenalty: 0,
         inventory: cloudInventory,
         loadout: cloudLoadout,
-        hp: 100, maxHp: 100
+        hp: 100, maxHp: 100,
+        statusEffects: [],
+        isDead: false
       };
       stateRef.current.enemies = {};
       stateRef.current.projectiles = {};
@@ -82,8 +84,8 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
               if (typeof p.y !== 'number' || isNaN(p.y)) p.y = 0;
               
               // Merge with cloud data if logged in
-              const inventory = user ? JSON.parse(localStorage.getItem('elemental_clash_cloud_inventory') || '[]') : (p.inventory || []);
-              const loadout = user ? JSON.parse(localStorage.getItem('elemental_clash_cloud_loadout') || '{"attack":null,"defense":null,"mobility":null,"healing":null,"ultimate":null}') : (p.loadout || { attack: null, defense: null, mobility: null, healing: null, ultimate: null });
+              const inventory = user ? JSON.parse(localStorage.getItem(getInventoryKey(user.uid)) || '[]') : (p.inventory || []);
+              const loadout = user ? JSON.parse(localStorage.getItem(getLoadoutKey(user.uid)) || '{"attack":null,"defense":null,"mobility":null,"healing":null,"ultimate":null}') : (p.loadout || { attack: null, defense: null, mobility: null, healing: null, ultimate: null });
 
               stateRef.current.players['local'] = {
                 id: 'local',
@@ -91,24 +93,35 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
                 y: p.y,
                 color: p.color || '#3b82f6',
                 speed: p.speed || 5,
-                coins: globalCoins,
+                vx: 0,
+                vy: 0,
+                coins: coins,
                 pvePenalty: p.pvePenalty || 30,
                 pvpPenalty: p.pvpPenalty || 0,
                 inventory,
                 loadout,
                 hp: p.hp || 100,
-                maxHp: p.maxHp || 100
+                maxHp: p.maxHp || 100,
+                statusEffects: p.statusEffects || [],
+                isDead: p.isDead || false
               };
             }
           }
           if (parsed.customElements) {
-            const cloudCustomElements = user ? JSON.parse(localStorage.getItem('elemental_clash_cloud_custom_elements') || '{}') : parsed.customElements;
+            const cloudCustomElements = user ? JSON.parse(localStorage.getItem(getCustomElementsKey(user.uid)) || '{}') : parsed.customElements;
             stateRef.current.customElements = cloudCustomElements;
           }
         } catch(e) {}
       }
     }
-  }, [reset, worldId, user]);
+  }, [reset, worldId, user, coins]);
+
+  useEffect(() => {
+    if (!inLobby) {
+      gameplayStart();
+      return () => gameplayStop();
+    }
+  }, [inLobby]);
 
   useEffect(() => {
     if (inLobby) return;
@@ -116,7 +129,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
     let lastTime = Date.now();
     const TICK_RATE = 1000 / 60;
     const intervalId = setInterval(() => {
-      if (showBuilder || showForge || showPause) {
+      if (showBuilder || showForge || showPause || stateRef.current.players['local']?.isDead) {
         lastTime = Date.now(); // Reset lastTime when unpausing
         return; 
       }
@@ -132,15 +145,19 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
       const lastShots = new Map<string, number>();
       lastShots.set('local', lastShotRef.current);
 
+      const oldBossCount = Object.keys(state.bosses).length;
       updateGameState(state, inputs, lastShots, lastUltimatesRef.current, now, dt, false);
+      const newBossCount = Object.keys(state.bosses).length;
+
+      if (newBossCount < oldBossCount) {
+        happyTime();
+      }
       
       lastShotRef.current = lastShots.get('local') || 0;
 
       // Sync global coins
-      if (state.players['local'] && state.players['local'].coins !== lastCoinsRef.current) {
-        lastCoinsRef.current = state.players['local'].coins;
-        setInitialCoins(state.players['local'].coins);
-        window.dispatchEvent(new CustomEvent('coins_changed', { detail: state.players['local'].coins }));
+      if (state.players['local'] && state.players['local'].coins !== coins) {
+        setCoins(state.players['local'].coins);
       }
 
       // Force re-render by cloning state
@@ -153,7 +170,8 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
         customElements: { ...state.customElements },
         bosses: { ...state.bosses },
         hazards: { ...state.hazards },
-        impactDecals: { ...state.impactDecals }
+        impactDecals: { ...state.impactDecals },
+        tiles: { ...state.tiles }
       });
 
     }, TICK_RATE);
@@ -167,7 +185,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
       clearInterval(saveInterval);
       localStorage.setItem(`elemental_clash_world_${worldId}`, JSON.stringify(stateRef.current));
     };
-  }, [inLobby, showBuilder, showForge, showPause, worldId]);
+  }, [inLobby, showBuilder, showForge, showPause, worldId, coins, setCoins]);
 
   const handleSpawn = (pvePenalty: number, pvpPenalty: number) => {
     const player = stateRef.current.players['local'];
@@ -178,21 +196,75 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
     setInLobby(false);
   };
 
+  const handleRespawn = (useAd = false) => {
+    const player = stateRef.current.players['local'];
+    if (player) {
+      if (!useAd) {
+        const penalty = player.pvePenalty;
+        const coinsLost = Math.floor(player.coins * (penalty / 100));
+        player.coins -= coinsLost;
+        if (coinsLost > 0) {
+          dropLoot(stateRef.current, player.x, player.y, coinsLost);
+        }
+      }
+      
+      player.hp = player.maxHp;
+      player.isDead = false;
+      player.x = Math.random() * 500 - 250;
+      player.y = Math.random() * 500 - 250;
+      setGameState({ ...stateRef.current });
+    }
+  };
+
+  const handleReviveAd = () => {
+    setAdLoading(true);
+    try {
+      requestAd('rewarded', () => {
+        handleRespawn(true);
+        setAdLoading(false);
+      }, (err) => {
+        console.error('Revive ad error:', err);
+        setAdLoading(false);
+        toast.error('Failed to load ad. Please try again.');
+      });
+    } catch (err) {
+      console.error('Revive ad request failed:', err);
+      setAdLoading(false);
+      toast.error('Ad request failed.');
+    }
+  };
+
+  const handlePause = () => {
+    if (isCrazyGames) {
+      try {
+        requestAd('midroll', () => {
+          setShowPause(true);
+        }, (err) => {
+          console.error('Midroll ad error:', err);
+          setShowPause(true); // Still show pause menu
+        });
+      } catch (err) {
+        console.error('Midroll ad request failed:', err);
+        setShowPause(true);
+      }
+    } else {
+      setShowPause(true);
+    }
+  };
+
   const handleBuy = (element: ElementType) => {
     const player = stateRef.current.players['local'];
     if (player && player.coins >= 100 && !player.inventory.includes(element)) {
+      spendCoins(100);
       player.coins -= 100;
       player.inventory.push(element);
       setGameState({ ...stateRef.current });
       localStorage.setItem(`elemental_clash_world_${worldId}`, JSON.stringify(stateRef.current));
       
       if (user) {
-        localStorage.setItem('elemental_clash_cloud_inventory', JSON.stringify(player.inventory));
+        localStorage.setItem(getInventoryKey(user.uid), JSON.stringify(player.inventory));
         window.dispatchEvent(new CustomEvent('sync_to_cloud'));
       }
-
-      lastCoinsRef.current = player.coins;
-      window.dispatchEvent(new CustomEvent('coins_changed', { detail: player.coins }));
     }
   };
 
@@ -204,7 +276,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
       localStorage.setItem(`elemental_clash_world_${worldId}`, JSON.stringify(stateRef.current));
       
       if (user) {
-        localStorage.setItem('elemental_clash_cloud_loadout', JSON.stringify(player.loadout));
+        localStorage.setItem(getLoadoutKey(user.uid), JSON.stringify(player.loadout));
         window.dispatchEvent(new CustomEvent('sync_to_cloud'));
       }
     }
@@ -213,6 +285,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
   const handleForge = (newElement: CustomElement, cost: number, consumedElements?: ElementType[]) => {
     const player = stateRef.current.players['local'];
     if (player && player.coins >= cost) {
+      spendCoins(cost);
       player.coins -= cost;
       if (!stateRef.current.customElements) {
         stateRef.current.customElements = {};
@@ -234,42 +307,27 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
       localStorage.setItem(`elemental_clash_world_${worldId}`, JSON.stringify(stateRef.current));
       
       if (user) {
-        localStorage.setItem('elemental_clash_cloud_inventory', JSON.stringify(player.inventory));
-        localStorage.setItem('elemental_clash_cloud_custom_elements', JSON.stringify(stateRef.current.customElements));
+        localStorage.setItem(getInventoryKey(user.uid), JSON.stringify(player.inventory));
+        localStorage.setItem(getCustomElementsKey(user.uid), JSON.stringify(stateRef.current.customElements));
         window.dispatchEvent(new CustomEvent('sync_to_cloud'));
       }
-
-      lastCoinsRef.current = player.coins;
-      window.dispatchEvent(new CustomEvent('coins_changed', { detail: player.coins }));
     }
   };
 
   if (inLobby) {
-    return <Lobby mode="single" initialCoins={initialCoins} onSpawn={handleSpawn} onExit={onExit} />;
+    return <Lobby mode="single" initialCoins={coins} onSpawn={handleSpawn} onExit={onExit} />;
   }
 
   const player = gameState.players['local'];
 
-  const handleEnemyIntent = (enemyId: string, intent: any) => {
-    const enemy = stateRef.current.enemies[enemyId] || stateRef.current.bosses[enemyId];
-    if (enemy) {
-      enemy.intent = intent;
-    }
-  };
-
   return (
     <>
-      <GeminiAIController 
-        gameState={gameState} 
-        onIntent={handleEnemyIntent} 
-        isActive={!showPause && !showBuilder && !showForge} 
-      />
       <Renderer 
         gameState={gameState} 
         myId="local" 
         onInput={(input) => { inputRef.current = input; }} 
         onExit={onExit} 
-        onPause={() => setShowPause(true)}
+        onPause={handlePause}
         onOpenBuilder={() => setShowBuilder(true)}
         isBuilderOpen={showBuilder}
         onOpenForge={() => setShowForge(true)}
@@ -280,6 +338,41 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
           onResume={() => setShowPause(false)}
           onExit={onExit}
         />
+      )}
+      {player?.isDead && (
+        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-24 h-24 bg-red-500/20 rounded-full flex items-center justify-center mb-6 animate-pulse">
+            <span className="text-5xl">💀</span>
+          </div>
+          <h2 className="text-4xl font-black text-red-500 mb-2">You Were Defeated</h2>
+          <p className="text-slate-400 mb-8 max-w-md">
+            The void has consumed you. You will lose <span className="text-orange-400 font-bold">{player.pvePenalty}%</span> of your coins if you respawn now.
+          </p>
+          
+          <div className="flex flex-col gap-4 w-full max-w-xs">
+            {isCrazyGames && (
+              <button 
+                onClick={handleReviveAd}
+                disabled={adLoading}
+                className="w-full py-4 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 disabled:opacity-50 rounded-2xl font-black text-lg shadow-xl transition-all transform hover:scale-105 flex items-center justify-center gap-3"
+              >
+                {adLoading ? 'Loading Ad...' : '📺 Revive (Keep Coins)'}
+              </button>
+            )}
+            <button 
+              onClick={() => handleRespawn(false)}
+              className="w-full py-4 bg-slate-700 hover:bg-slate-600 rounded-2xl font-bold text-lg transition-all"
+            >
+              Respawn (-{Math.floor(player.coins * (player.pvePenalty / 100))} Coins)
+            </button>
+            <button 
+              onClick={onExit}
+              className="w-full py-3 text-slate-500 hover:text-slate-300 font-bold transition-all"
+            >
+              Exit to Menu
+            </button>
+          </div>
+        </div>
       )}
       {showBuilder && player && (
         <Builder 

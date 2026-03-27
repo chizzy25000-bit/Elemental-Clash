@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import SinglePlayer from './game/SinglePlayer';
-import MultiPlayer from './game/MultiPlayer';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { CoinProvider, useCoins } from './contexts/CoinContext';
+import { Toaster } from 'sonner';
 import { FirebaseSync } from './components/FirebaseSync';
 import { LogIn, LogOut, User as UserIcon } from 'lucide-react';
 
@@ -14,27 +15,15 @@ interface World {
 
 function AppContent() {
   const { user, login, logout } = useAuth();
-  const [mode, setMode] = useState<'menu' | 'sp_menu' | 'sp_play' | 'mp_menu' | 'mp_play'>('menu');
+  const { coins } = useCoins();
+  const [mode, setMode] = useState<'menu' | 'sp_menu' | 'sp_play'>('menu');
   const [spReset, setSpReset] = useState(false);
   const [selectedWorldId, setSelectedWorldId] = useState<string>('');
   const [worlds, setWorlds] = useState<World[]>([]);
-  const [mpAction, setMpAction] = useState<'host' | 'join'>('host');
-  const [mpCode, setMpCode] = useState('');
-  const [coins, setCoins] = useState(500);
 
   useEffect(() => {
-    const savedCoins = localStorage.getItem('elemental_clash_global_coins');
-    if (savedCoins) setCoins(parseInt(savedCoins, 10));
-
     const savedWorlds = localStorage.getItem('elemental_clash_worlds');
     if (savedWorlds) setWorlds(JSON.parse(savedWorlds));
-
-    const handleCoinsChanged = (e: any) => {
-      setCoins(e.detail);
-      localStorage.setItem('elemental_clash_global_coins', e.detail.toString());
-    };
-    window.addEventListener('coins_changed', handleCoinsChanged);
-    return () => window.removeEventListener('coins_changed', handleCoinsChanged);
   }, []);
 
   const createNewWorld = () => {
@@ -64,11 +53,10 @@ function AppContent() {
     localStorage.removeItem(`elemental_clash_world_${id}`);
   };
 
-  if (mode === 'sp_play') return <ErrorBoundary><SinglePlayer worldId={selectedWorldId} reset={spReset} onExit={() => setMode('menu')} /></ErrorBoundary>;
-  if (mode === 'mp_play') return <ErrorBoundary><MultiPlayer action={mpAction} roomCode={mpCode} onExit={() => setMode('menu')} /></ErrorBoundary>;
+  if (mode === 'sp_play') return <SinglePlayer worldId={selectedWorldId} reset={spReset} onExit={() => setMode('menu')} />;
 
   return (
-    <ErrorBoundary>
+    <>
       <FirebaseSync />
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white font-sans relative overflow-hidden">
         {/* Auth & Coin Bar */}
@@ -126,25 +114,14 @@ function AppContent() {
           
           <div className="flex flex-col gap-6 w-72 mt-8">
             {mode === 'menu' && (
-              <>
-                <button 
-                  onClick={() => setMode('sp_menu')}
-                  className="group relative px-6 py-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-2xl font-bold text-xl transition-all shadow-xl overflow-hidden"
-                >
-                  <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-blue-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                  Single Player
-                  <div className="text-xs text-slate-400 font-normal mt-1">Saves locally to your device</div>
-                </button>
-                
-                <button 
-                  onClick={() => setMode('mp_menu')}
-                  className="group relative px-6 py-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-2xl font-bold text-xl transition-all shadow-xl overflow-hidden"
-                >
-                  <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-emerald-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                  Multiplayer
-                  <div className="text-xs text-slate-400 font-normal mt-1">Connect to the MMO Server</div>
-                </button>
-              </>
+              <button 
+                onClick={() => setMode('sp_menu')}
+                className="group relative px-6 py-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-2xl font-bold text-xl transition-all shadow-xl overflow-hidden"
+              >
+                <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-blue-600/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                Single Player
+                <div className="text-xs text-slate-400 font-normal mt-1">Saves locally to your device</div>
+              </button>
             )}
 
             {mode === 'sp_menu' && (
@@ -193,53 +170,22 @@ function AppContent() {
                 </button>
               </div>
             )}
-
-            {mode === 'mp_menu' && (
-              <>
-                <button 
-                  onClick={() => { setMpAction('host'); setMode('mp_play'); }}
-                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-lg transition-colors shadow-lg"
-                >
-                  Host Server
-                </button>
-                
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="Enter Code" 
-                    value={mpCode}
-                    onChange={(e) => setMpCode(e.target.value.toLowerCase())}
-                    className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 font-mono text-center"
-                    maxLength={6}
-                  />
-                  <button 
-                    onClick={() => { if(mpCode) { setMpAction('join'); setMode('mp_play'); } }}
-                    className="py-4 px-6 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold transition-colors shadow-lg disabled:opacity-50"
-                    disabled={!mpCode}
-                  >
-                    Join
-                  </button>
-                </div>
-
-                <button 
-                  onClick={() => setMode('menu')}
-                  className="w-full py-2 mt-4 text-slate-400 hover:text-white transition-colors"
-                >
-                  Back
-                </button>
-              </>
-            )}
           </div>
         </div>
       </div>
-    </ErrorBoundary>
+    </>
   );
 }
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <CoinProvider>
+          <AppContent />
+          <Toaster position="top-center" richColors theme="dark" />
+        </CoinProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

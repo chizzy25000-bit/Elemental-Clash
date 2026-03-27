@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { Player } from '../shared';
+import { requestAd } from '../lib/crazygames';
+import { useCoins } from '../contexts/CoinContext';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Props {
   mode: 'single' | 'multi';
@@ -15,6 +18,19 @@ interface Props {
 export default function Lobby({ mode, players, initialCoins, roomCode, isHost, onSpawn, onExit, onDeleteServer }: Props) {
   const [pvePenalty, setPvePenalty] = useState(30);
   const [pvpPenalty, setPvpPenalty] = useState(40);
+  const { addCoins } = useCoins();
+  const { isCrazyGames } = useAuth();
+  const [adLoading, setAdLoading] = useState(false);
+
+  const handleRewardedAd = () => {
+    setAdLoading(true);
+    requestAd('rewarded', () => {
+      addCoins(100);
+      setAdLoading(false);
+    }, () => {
+      setAdLoading(false);
+    });
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white font-sans relative overflow-hidden p-4">
@@ -38,6 +54,16 @@ export default function Lobby({ mode, players, initialCoins, roomCode, isHost, o
             <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 w-full flex flex-col items-center">
               <span className="text-slate-400 text-sm uppercase tracking-wider font-bold mb-1">Current Balance</span>
               <span className="text-4xl font-black text-yellow-400">{initialCoins} <span className="text-xl">Coins</span></span>
+              
+              {isCrazyGames && (
+                <button 
+                  onClick={handleRewardedAd}
+                  disabled={adLoading}
+                  className="mt-4 px-4 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-lg"
+                >
+                  {adLoading ? 'Loading Ad...' : '📺 Get 100 Coins'}
+                </button>
+              )}
             </div>
           </div>
 

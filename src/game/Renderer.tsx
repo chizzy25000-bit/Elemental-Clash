@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { GameState, InputState } from '../shared';
 import { ELEMENT_COLORS, getElementColor, getCustomElementEffect, getTileAt, isWall, movePlayer } from '../gameLogic';
+import { EntitySprite } from '../components/sprites/EntitySprite';
 
 const TILE_SIZE = 64;
 const TILE_COLORS: Record<string, string> = {
@@ -50,12 +51,11 @@ export default function Renderer({ gameState, myId, onInput, onExit, onPause, on
   const particlesRef = useRef<Particle[]>([]);
   const [isTouch, setIsTouch] = useState(false);
   
-  const inputRef = useRef<InputState>({ dx: 0, dy: 0, aimX: 1, aimY: 0, isShooting: false, isUltimate: false });
+  const inputRef = useRef<InputState>({ dx: 0, dy: 0, aimX: 0, aimY: 0, isShooting: false, isUltimate: false });
   const keysRef = useRef<{ [key: string]: boolean }>({});
   
   const localPosRef = useRef({ x: 0, y: 0 });
   const lastServerPosRef = useRef({ x: 0, y: 0 });
-  const lastHpRef = useRef(100);
   const initializedRef = useRef(false);
   const lastRenderTimeRef = useRef(Date.now());
   const remotePlayersRef = useRef<Record<string, { x: number, y: number, lastX: number, lastY: number, lastUpdate: number }>>({});
@@ -110,11 +110,6 @@ export default function Renderer({ gameState, myId, onInput, onExit, onPause, on
   }, []);
 
   // Input handling loop
-  const onInputRef = useRef(onInput);
-  useEffect(() => {
-    onInputRef.current = onInput;
-  }, [onInput]);
-
   useEffect(() => {
     let animationFrameId: number;
     const loop = () => {
@@ -134,12 +129,12 @@ export default function Renderer({ gameState, myId, onInput, onExit, onPause, on
         inputRef.current.dy = dy;
       }
       
-      onInputRef.current({ ...inputRef.current, x: localPosRef.current.x, y: localPosRef.current.y });
+      onInput({ ...inputRef.current });
       animationFrameId = requestAnimationFrame(loop);
     };
     loop();
     return () => cancelAnimationFrame(animationFrameId);
-  }, [isTouch]);
+  }, [isTouch, onInput]);
 
   // Event listeners for desktop
   useEffect(() => {
@@ -223,33 +218,37 @@ export default function Renderer({ gameState, myId, onInput, onExit, onPause, on
 
       const myPlayer = gameState.players[myId];
       
-      // Client-Authoritative Movement
+      // Client-Side Prediction & Reconciliation
       if (myPlayer) {
         if (!initializedRef.current) {
           localPosRef.current = { x: myPlayer.x, y: myPlayer.y };
           lastServerPosRef.current = { x: myPlayer.x, y: myPlayer.y };
           initializedRef.current = true;
-        }
-        // We no longer reconcile with server position for the local player
-        // to ensure "local movement" as requested.
-        // The server will now follow the client's reported position.
-        
-        // Handle respawn or teleportation (if gameLogic moved us significantly)
-        const dist = Math.hypot(myPlayer.x - localPosRef.current.x, myPlayer.y - localPosRef.current.y);
-        const isExactlyZero = myPlayer.x === 0 && myPlayer.y === 0;
-        if (dist > 100 || isExactlyZero) {
-          localPosRef.current.x = myPlayer.x;
-          localPosRef.current.y = myPlayer.y;
+        } else {
+          // If server position changed, reconcile
+          if (myPlayer.x !== lastServerPosRef.current.x || myPlayer.y !== lastServerPosRef.current.y) {
+            const dx = myPlayer.x - localPosRef.current.x;
+            const dy = myPlayer.y - localPosRef.current.y;
+            
+            // If error is small, blend it (smoothing)
+            // If error is large (teleport), snap
+            if (Math.hypot(dx, dy) > 100) {
+              localPosRef.current = { x: myPlayer.x, y: myPlayer.y };
+            } else {
+              // Soft correction: move local position 10% towards server position
+              localPosRef.current.x += dx * 0.1;
+              localPosRef.current.y += dy * 0.1;
+            }
+            lastServerPosRef.current = { x: myPlayer.x, y: myPlayer.y };
+          }
         }
 
         // Predict forward
-        if (!myPlayer.stunned || myPlayer.stunned <= 0) {
-          // Create a temporary player object to use movePlayer
-          const tempPlayer = { ...myPlayer, x: localPosRef.current.x, y: localPosRef.current.y };
-          movePlayer(gameState, tempPlayer, inputRef.current, dt);
-          localPosRef.current.x = tempPlayer.x;
-          localPosRef.current.y = tempPlayer.y;
-        }
+        // Create a temporary player object to use movePlayer
+        const tempPlayer = { ...myPlayer, x: localPosRef.current.x, y: localPosRef.current.y };
+        movePlayer(gameState, tempPlayer, inputRef.current, dt);
+        localPosRef.current.x = tempPlayer.x;
+        localPosRef.current.y = tempPlayer.y;
       }
 
       // Update remote player interpolation data
@@ -367,17 +366,6 @@ export default function Renderer({ gameState, myId, onInput, onExit, onPause, on
         ctx.lineTo(camX + canvas.width, y);
       }
       ctx.stroke();
-
-      // Cyberpunk Ad Banners
-
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(100, 100, 200, 50);
-      ctx.strokeStyle = '#06b6d4'; // cyan-500
-      ctx.lineWidth = 2;
-      ctx.strokeRect(100, 100, 200, 50);
-      ctx.fillStyle = '#06b6d4';
-      ctx.font = 'bold 14px Inter, sans-serif';
-      ctx.fillText('CYBER-AD: UPGRADE NOW', 120, 130);
 
       // Impact Decals
       if (gameState.impactDecals) {
@@ -499,86 +487,6 @@ export default function Renderer({ gameState, myId, onInput, onExit, onPause, on
         });
       }
 
-      // Bosses
-      if (gameState.bosses) {
-        Object.values(gameState.bosses).forEach(b => {
-          if (!b) return;
-          
-          ctx.fillStyle = '#8b5cf6';
-          ctx.shadowColor = '#8b5cf6';
-          ctx.shadowBlur = 30;
-          ctx.beginPath();
-          ctx.moveTo(b.x, b.y - 60);
-          ctx.lineTo(b.x + 50, b.y + 30);
-          ctx.lineTo(b.x - 50, b.y + 30);
-          ctx.closePath();
-          ctx.fill();
-          ctx.shadowBlur = 0;
-
-          // Boss Shield
-          if (b.shieldHp > 0) {
-            ctx.strokeStyle = getElementColor(gameState, b.shieldElement);
-            ctx.lineWidth = 5;
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, 90, 0, Math.PI * 2);
-            ctx.stroke();
-            
-            // Shield HP
-            const shieldPct = b.shieldHp / b.maxShieldHp;
-            ctx.strokeStyle = '#60a5fa';
-            ctx.lineWidth = 8;
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, 90, -Math.PI/2, -Math.PI/2 + (Math.PI * 2 * shieldPct));
-            ctx.stroke();
-          }
-
-          // Boss Name & HP Bar
-          const hpPercent = b.hp / b.maxHp;
-          
-          ctx.fillStyle = 'white';
-          ctx.font = 'bold 14px Inter, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(b.name || 'Elemental Titan', b.x, b.y - 85);
-
-          ctx.fillStyle = '#ef4444';
-          ctx.fillRect(b.x - 30, b.y - 70, 60, 6);
-          ctx.fillStyle = '#22c55e';
-          ctx.fillRect(b.x - 30, b.y - 70, 60 * hpPercent, 6);
-        });
-      }
-
-      // Enemies
-      if (gameState.enemies) {
-        Object.values(gameState.enemies).forEach(enemy => {
-          if (!enemy) return;
-          
-          if (enemy.type === 'void_creature') {
-            ctx.fillStyle = '#8b5cf6'; // violet-500
-            ctx.beginPath();
-            ctx.arc(enemy.x, enemy.y, 15, 0, Math.PI * 2);
-            ctx.fill();
-          } else {
-            ctx.fillStyle = getElementColor(gameState, enemy.element);
-            ctx.beginPath();
-            ctx.rect(enemy.x - 15, enemy.y - 15, 30, 30);
-            ctx.fill();
-          }
-
-          // Enemy Name & HP Bar
-          const hpPercent = enemy.hp / enemy.maxHp;
-          
-          ctx.fillStyle = 'white';
-          ctx.font = 'bold 12px Inter, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(enemy.name || (enemy.type === 'void_creature' ? 'Void Stalker' : 'Alchemist Bot'), enemy.x, enemy.y - 35);
-
-          ctx.fillStyle = '#ef4444';
-          ctx.fillRect(enemy.x - 15, enemy.y - 25, 30, 4);
-          ctx.fillStyle = '#22c55e';
-          ctx.fillRect(enemy.x - 15, enemy.y - 25, 30 * hpPercent, 4);
-        });
-      }
-
       // Projectiles
       if (gameState.projectiles) {
         Object.values(gameState.projectiles).forEach(p => {
@@ -603,99 +511,6 @@ export default function Renderer({ gameState, myId, onInput, onExit, onPause, on
             size: effectType === 'pulse' ? 4 : 2,
             effectType: effectType === 'none' ? 'trail' : effectType
           });
-        });
-      }
-
-      // Players
-      if (gameState.players) {
-        Object.values(gameState.players).forEach(p => {
-          if (!p) return;
-          
-          // Dynamic color based on element
-          const element = p.loadout.attack || 'fire';
-          const color = getElementColor(gameState, element);
-          const effectType = getCustomElementEffect(gameState, element);
-          
-          // Aura
-          if (p.aura) {
-            ctx.strokeStyle = p.aura;
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]);
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, 30, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-
-          ctx.shadowColor = color;
-          ctx.shadowBlur = 20;
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          
-          let drawX = p.x;
-          let drawY = p.y;
-          
-          if (p.id === myId) {
-            drawX = localPosRef.current.x;
-            drawY = localPosRef.current.y;
-          } else {
-            // Interpolate remote player
-            const remote = remotePlayersRef.current[p.id];
-            if (remote) {
-              const lerpFactor = Math.min(1, (now - remote.lastUpdate) / (1000 / 60));
-              drawX = remote.lastX + (remote.x - remote.lastX) * lerpFactor;
-              drawY = remote.lastY + (remote.y - remote.lastY) * lerpFactor;
-            }
-          }
-
-          ctx.arc(drawX, drawY, 20, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-          
-          // Particle emission (Prestige Trails)
-          const trailChance = p.coins > 10000 ? 0.8 : p.coins > 5000 ? 0.5 : 0.2;
-          if (Math.random() < trailChance) {
-            particlesRef.current.push({
-              x: drawX,
-              y: drawY,
-              vx: (Math.random() - 0.5) * 1,
-              vy: (Math.random() - 0.5) * 1,
-              color: p.coins > 10000 ? '#facc15' : color,
-              life: 0.8,
-              size: p.coins > 10000 ? Math.random() * 4 + 2 : Math.random() * 2 + 1,
-              effectType: p.coins > 10000 ? 'sparkle' : 'trail',
-              angle: Math.random() * Math.PI * 2,
-              radius: Math.random() * 20 + 10
-            });
-          }
-          
-          if (p.id === myId) {
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-          }
-
-          // Stun indicator
-          if (p.stunned && p.stunned > 0) {
-            ctx.strokeStyle = '#94a3b8';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.arc(drawX, drawY - 45, 10, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.fillStyle = '#facc15';
-            ctx.beginPath();
-            ctx.arc(drawX + Math.cos(Date.now()/100)*10, drawY - 45 + Math.sin(Date.now()/100)*10, 3, 0, Math.PI * 2);
-            ctx.fill();
-          }
-
-          // HP Bar
-          if (p.hp !== undefined && p.maxHp !== undefined) {
-            const hpPercent = Math.max(0, p.hp / p.maxHp);
-            ctx.fillStyle = '#ef4444';
-            ctx.fillRect(drawX - 25, drawY - 35, 50, 6);
-            ctx.fillStyle = '#22c55e';
-            ctx.fillRect(drawX - 25, drawY - 35, 50 * hpPercent, 6);
-          }
         });
       }
 
@@ -801,9 +616,91 @@ export default function Renderer({ gameState, myId, onInput, onExit, onPause, on
     return () => cancelAnimationFrame(animationFrameId);
   }, [gameState, myId]);
 
+  const myPlayer = gameState.players[myId];
+  const camX = myPlayer ? localPosRef.current.x - (window.innerWidth / 2) : 0;
+  const camY = myPlayer ? localPosRef.current.y - (window.innerHeight / 2) : 0;
+
   return (
     <div className="relative w-full h-screen overflow-hidden bg-slate-900">
       <canvas ref={canvasRef} className="absolute inset-0 block" />
+      
+      {/* Sprite Layer */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div 
+          style={{ 
+            transform: `translate(${-camX + shakeRef.current * (Math.random() - 0.5)}px, ${-camY + shakeRef.current * (Math.random() - 0.5)}px)`,
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%'
+          }}
+        >
+          {/* Players */}
+          {Object.values(gameState.players).map(p => {
+            const color = getElementColor(gameState, p.loadout.attack || 'fire');
+            let drawX = p.x;
+            let drawY = p.y;
+            if (p.id === myId) {
+              drawX = localPosRef.current.x;
+              drawY = localPosRef.current.y;
+            } else {
+              const remote = remotePlayersRef.current[p.id];
+              if (remote) {
+                const lerpFactor = Math.min(1, (Date.now() - remote.lastUpdate) / (1000 / 60));
+                drawX = remote.lastX + (remote.x - remote.lastX) * lerpFactor;
+                drawY = remote.lastY + (remote.y - remote.lastY) * lerpFactor;
+              }
+            }
+            return (
+              <div key={p.id} style={{ position: 'absolute', left: drawX - 20, top: drawY - 20 }}>
+                <EntitySprite type="player" color={color} size={40} isMoving={Math.abs(p.vx) > 0.1 || Math.abs(p.vy) > 0.1} />
+                {/* HP Bar */}
+                <div className="absolute -top-4 left-0 w-full h-1.5 bg-red-500 rounded-full overflow-hidden">
+                  <div className="h-full bg-green-500" style={{ width: `${(p.hp / p.maxHp) * 100}%` }} />
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Enemies */}
+          {Object.values(gameState.enemies).map(e => (
+            <div key={e.id} style={{ position: 'absolute', left: e.x - 15, top: e.y - 15 }}>
+              <EntitySprite 
+                type={e.type as any} 
+                color={getElementColor(gameState, e.element)} 
+                size={30} 
+                isMoving={true} 
+              />
+              {/* HP Bar */}
+              <div className="absolute -top-3 left-0 w-full h-1 bg-red-500 rounded-full overflow-hidden">
+                <div className="h-full bg-green-500" style={{ width: `${(e.hp / e.maxHp) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+
+          {/* Bosses */}
+          {Object.values(gameState.bosses).map(b => (
+            <div key={b.id} style={{ position: 'absolute', left: b.x - 50, top: b.y - 50 }}>
+              <EntitySprite type="boss" color="#8b5cf6" size={100} isMoving={true} />
+              {/* Boss Name */}
+              <div className="absolute -top-12 left-0 w-full text-center text-white font-bold text-sm drop-shadow-md">
+                {b.name}
+              </div>
+              {/* HP Bar */}
+              <div className="absolute -top-8 left-0 w-full h-2 bg-red-500 rounded-full overflow-hidden border border-black/50">
+                <div className="h-full bg-green-500" style={{ width: `${(b.hp / b.maxHp) * 100}%` }} />
+              </div>
+              {/* Shield Bar */}
+              {b.shieldHp > 0 && (
+                <div className="absolute -top-10 left-0 w-full h-1.5 bg-blue-900 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-400" style={{ width: `${(b.shieldHp / b.maxShieldHp) * 100}%` }} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
       
       {/* UI Overlay */}
       <div className={`absolute top-2 left-2 md:top-4 md:left-4 z-[100] flex flex-col gap-3 ${isTouch ? 'max-w-[80%]' : ''}`}>

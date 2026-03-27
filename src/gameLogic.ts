@@ -1,4 +1,4 @@
-import { GameState, InputState, ElementType, Projectile, Enemy, LootOrb, FloatingText, Player, CustomElement, HazardType } from './shared';
+import { GameState, InputState, ElementType, Projectile, Enemy, LootOrb, FloatingText, Player, CustomElement, HazardType, StatusEffect } from './shared';
 
 export const ELEMENT_COLORS: Record<string, string> = {
   fire: '#ef4444',
@@ -35,6 +35,36 @@ export function getEvolutionCost(tier: number): number {
   // Evolution is 40% of the cost of forging a new element of that tier
   const forgeCost = Math.min(15000, Math.floor(500 * Math.pow(1.5, tier)));
   return Math.floor(forgeCost * 0.4);
+}
+
+function processStatusEffects(entity: { hp: number, maxHp: number, speed: number, statusEffects: StatusEffect[] }, dt: number, state: GameState, x: number, y: number) {
+  if (!entity.statusEffects) entity.statusEffects = [];
+  entity.statusEffects = entity.statusEffects.filter(effect => {
+    effect.duration -= dt * 60;
+    if (effect.duration <= 0) return false;
+
+    if (effect.type === 'burning') {
+      entity.hp -= 0.5 * dt * 60;
+      if (Math.random() < 0.1 * dt * 60) addFloatingText(state, x, y, 'BURN', '#ef4444');
+    } else if (effect.type === 'poisoned') {
+      entity.hp -= 0.2 * dt * 60;
+      if (Math.random() < 0.1 * dt * 60) addFloatingText(state, x, y, 'POISON', '#22c55e');
+    } else if (effect.type === 'slowed') {
+      entity.speed *= 0.5;
+    } else if (effect.type === 'stunned') {
+      entity.speed = 0;
+    }
+    return true;
+  });
+}
+
+function getDecalType(state: GameState, element: ElementType | 'void'): 'scorch' | 'ice' | 'impact' | 'poison' | 'void' {
+  const baseType = getBaseType(state, element);
+  if (baseType === 'fire') return 'scorch';
+  if (baseType === 'water') return 'ice';
+  if (baseType === 'earth') return 'impact';
+  if (baseType === 'air') return 'impact';
+  return 'void';
 }
 
 export function evolveElement(element: CustomElement): CustomElement {
@@ -76,7 +106,7 @@ export function addFloatingText(state: GameState, x: number, y: number, text: st
   state.floatingTexts[id] = { id, x, y, text, color, life: 30, maxLife: 30 };
 }
 
-export function addImpactDecal(state: GameState, x: number, y: number, color: string, type: 'scorch' | 'ice' | 'impact') {
+export function addImpactDecal(state: GameState, x: number, y: number, color: string, type: 'scorch' | 'ice' | 'impact' | 'poison' | 'void') {
   const id = generateId();
   state.impactDecals[id] = { id, x, y, color, size: 20 + Math.random() * 20, life: 300, maxLife: 300, type };
 }
@@ -126,7 +156,9 @@ export function spawnBoss(state: GameState) {
     id, x, y, type: 'void_creature', hp: 2000, maxHp: 2000, speed: 1.5,
     coinsToDrop: 1000, vx: 0, vy: 0, isBoss: true, name: 'Elemental Titan',
     phase: 1, shieldElement, shieldHp: 500, maxShieldHp: 500,
-    abilityCooldown: 180 // 3 seconds
+    abilityCooldown: 180, // 3 seconds
+    attackPattern: 0,
+    statusEffects: []
   };
 
   addFloatingText(state, target.x, target.y - 100, "BOSS INCOMING!", "#facc15");
@@ -158,14 +190,12 @@ export function spawnEnemy(state: GameState, isMultiplayer: boolean) {
     state.enemies[id] = {
       id, x, y, type: 'alchemist_bot', hp: 200, maxHp: 200, speed: 3,
       element: elements[Math.floor(Math.random() * elements.length)],
-      coinsToDrop: 150, vx: 0, vy: 0, lastShot: 0,
-      name: 'Alchemist Bot'
+      coinsToDrop: 150, vx: 0, vy: 0, lastShot: 0, statusEffects: []
     };
   } else {
     state.enemies[id] = {
       id, x, y, type: 'void_creature', hp: 50, maxHp: 50, speed: 2,
-      coinsToDrop: 20, vx: 0, vy: 0,
-      name: 'Void Stalker'
+      coinsToDrop: 20, vx: 0, vy: 0, statusEffects: []
     };
   }
 }
@@ -189,12 +219,14 @@ export function getTileAt(state: GameState, tx: number, ty: number): string {
   if (ty < 10) {
     // Surface
     if (caveNoise < 0.05) return 'wall_dirt';
-    if (biomeNoise < 0.15) return 'jungle_grass';
+    if (biomeNoise < 0.1) return 'volcanic_ash'; // New biome
+    if (biomeNoise < 0.2) return 'jungle_grass';
     if (biomeNoise < 0.3) return 'corruption_grass';
-    if (biomeNoise < 0.45) return 'crimson_grass';
-    if (biomeNoise < 0.6) return 'snow';
-    if (biomeNoise < 0.75) return 'desert_sand';
-    if (biomeNoise < 0.85) return 'hallow_grass';
+    if (biomeNoise < 0.4) return 'crimson_grass';
+    if (biomeNoise < 0.5) return 'snow';
+    if (biomeNoise < 0.6) return 'desert_sand';
+    if (biomeNoise < 0.7) return 'hallow_grass';
+    if (biomeNoise < 0.8) return 'crystal_fields'; // New biome
     return 'grass';
   } else if (ty < 50) {
     // Underground
@@ -230,9 +262,11 @@ export function movePlayer(state: GameState, player: Player, input: InputState, 
   else if (mobilityBase === 'earth') baseSpeed = 180 + (mobilityTier * 3);
   
   player.speed = baseSpeed;
+  player.vx = input.dx * player.speed * dt;
+  player.vy = input.dy * player.speed * dt;
 
-  const nextX = player.x + input.dx * player.speed * dt;
-  const nextY = player.y + input.dy * player.speed * dt;
+  const nextX = player.x + player.vx;
+  const nextY = player.y + player.vy;
 
   // Collision with walls
   const TILE_SIZE = 64;
@@ -276,7 +310,9 @@ export function updateGameState(
   // 1. Process Players
   for (const [id, input] of inputs.entries()) {
     const player = state.players[id];
-    if (!player) continue;
+    if (!player || player.isDead) continue;
+
+    processStatusEffects(player, dt, state, player.x, player.y);
 
     if (player.stunned && player.stunned > 0) {
       player.stunned -= dt * 60;
@@ -286,12 +322,7 @@ export function updateGameState(
     const loadout = player.loadout;
 
     // Mobility/Movement
-    if (input.x !== undefined && input.y !== undefined) {
-      player.x = input.x;
-      player.y = input.y;
-    } else {
-      movePlayer(state, player, input, dt);
-    }
+    movePlayer(state, player, input, dt);
 
     // Healing
 
@@ -404,125 +435,152 @@ export function updateGameState(
     }
   }
 
-  // 2. Process Enemies
-  // Spawn enemies randomly
-  if (Math.random() < 0.005 * dt * 60) { // roughly 1 per 3 seconds at 60fps
-    const maxEnemies = Math.min(isMultiplayer ? Object.keys(state.players).length * 5 : 10, 30);
-    if (Object.keys(state.enemies).length < maxEnemies) {
-      spawnEnemy(state, isMultiplayer);
-    }
-  }
-
-  for (const enemyId in state.enemies) {
-    const enemy = state.enemies[enemyId];
-    
-    // Find closest player
-    let closestPlayer: Player | null = null;
-    let minDist = Infinity;
-    for (const pid in state.players) {
-      const p = state.players[pid];
-      if (p.hp <= 0) continue;
-      const dist = Math.hypot(p.x - enemy.x, p.y - enemy.y);
-      if (dist < minDist) {
-        minDist = dist;
-        closestPlayer = p;
+    // 2. Process Enemies
+    // Spawn enemies randomly
+    if (Math.random() < 0.005 * dt * 60) { // roughly 1 per 3 seconds at 60fps
+      const maxEnemies = Math.min(isMultiplayer ? Object.keys(state.players).length * 5 : 10, 30);
+      if (Object.keys(state.enemies).length < maxEnemies) {
+        spawnEnemy(state, isMultiplayer);
       }
     }
 
-    let moveX = 0;
-    let moveY = 0;
-
-    if (enemy.intent && now - enemy.intent.timestamp < 3000) {
-      // Use Gemini AI intent
-      moveX = enemy.intent.dx;
-      moveY = enemy.intent.dy;
-    } else if (closestPlayer) {
-      // Default AI: move towards player with some strafing
-      const dx = closestPlayer.x - enemy.x;
-      const dy = closestPlayer.y - enemy.y;
-      const d = Math.hypot(dx, dy);
+    for (const enemyId in state.enemies) {
+      const enemy = state.enemies[enemyId];
       
-      if (d > 250) {
-        // Move towards
-        moveX = dx;
-        moveY = dy;
-      } else if (d < 150) {
-        // Back away
-        moveX = -dx;
-        moveY = -dy;
-      } else {
-        // Strafe
-        moveX = -dy;
-        moveY = dx;
+      processStatusEffects(enemy, dt, state, enemy.x, enemy.y);
+      
+      // Find closest player
+      let closestPlayer: Player | null = null;
+      let minDist = Infinity;
+      for (const pid in state.players) {
+        const p = state.players[pid];
+        const dist = Math.hypot(p.x - enemy.x, p.y - enemy.y);
+        if (dist < minDist) {
+          minDist = dist;
+          closestPlayer = p;
+        }
       }
-      
-      // Add some randomness to movement
-      moveX += (Math.random() - 0.5) * 50;
-      moveY += (Math.random() - 0.5) * 50;
-    }
 
-    const dist = Math.hypot(moveX, moveY);
-    if (dist > 0) {
-      const dx = (moveX / dist) * enemy.speed * dt * 60;
-      const dy = (moveY / dist) * enemy.speed * dt * 60;
-      
-      // Use player-like movement (sliding along walls)
-      const nextX = enemy.x + dx;
-      const nextY = enemy.y + dy;
-      
-      // Check X collision
-      const tileX = Math.floor(nextX / 64);
-      const tileY = Math.floor(enemy.y / 64);
-      const ttX = state.tiles?.[`${tileX},${tileY}`] || getTileAt(state, tileX, tileY);
-      if (!isWall(ttX)) {
-        enemy.x = nextX;
-      }
-      
-      // Check Y collision
-      const tileX2 = Math.floor(enemy.x / 64);
-      const tileY2 = Math.floor(nextY / 64);
-      const ttY = state.tiles?.[`${tileX2},${tileY2}`] || getTileAt(state, tileX2, tileY2);
-      if (!isWall(ttY)) {
-        enemy.y = nextY;
-      }
-    }
+      if (closestPlayer) {
+        const dx = closestPlayer.x - enemy.x;
+        const dy = closestPlayer.y - enemy.y;
+        const dist = Math.hypot(dx, dy);
+        
+        // Basic Pathfinder: Avoid walls and hazards
+        let targetVx = 0;
+        let targetVy = 0;
 
-    // Hazard collision
-    for (const hazard of Object.values(state.hazards)) {
-      const hDist = Math.hypot(enemy.x - hazard.x, enemy.y - hazard.y);
-      if (hDist < hazard.radius) {
-        enemy.hp -= 10 * dt; // Take damage over time
-        enemy.speed = Math.max(1, enemy.speed * 0.99); // Slow down slightly
-      }
-    }
+        if (dist > 0) {
+          targetVx = (dx / dist) * enemy.speed * dt * 60;
+          targetVy = (dy / dist) * enemy.speed * dt * 60;
+        }
 
-    if (closestPlayer) {
-      const dx = closestPlayer.x - enemy.x;
-      const dy = closestPlayer.y - enemy.y;
-      const pDist = Math.hypot(dx, dy);
-      
+        // Avoidance logic
+        const checkPoints = [
+          { x: enemy.x + targetVx * 5, y: enemy.y + targetVy * 5 }, // Forward
+          { x: enemy.x + targetVx * 5 - targetVy * 5, y: enemy.y + targetVy * 5 + targetVx * 5 }, // Left
+          { x: enemy.x + targetVx * 5 + targetVy * 5, y: enemy.y + targetVy * 5 - targetVx * 5 }, // Right
+        ];
+
+        let blocked = false;
+        for (const pt of checkPoints) {
+          const tx = Math.floor(pt.x / 64);
+          const ty = Math.floor(pt.y / 64);
+          if (isWall(getTileAt(state, tx, ty))) {
+            blocked = true;
+            break;
+          }
+          // Also avoid hazards
+          for (const hid in state.hazards) {
+            const h = state.hazards[hid];
+            if (Math.hypot(pt.x - h.x, pt.y - h.y) < h.radius) {
+              blocked = true;
+              break;
+            }
+          }
+          if (blocked) break;
+        }
+
+        if (blocked) {
+          // Try to steer away
+          const temp = targetVx;
+          targetVx = -targetVy;
+          targetVy = temp;
+        }
+
+        enemy.vx = targetVx;
+        enemy.vy = targetVy;
+
+        // Wall collision check for actual movement
+        const nextX = enemy.x + enemy.vx;
+        const nextY = enemy.y + enemy.vy;
+        
+        const tx = Math.floor(nextX / 64);
+        const ty = Math.floor(nextY / 64);
+        
+        if (!isWall(getTileAt(state, tx, ty))) {
+          enemy.x = nextX;
+          enemy.y = nextY;
+        } else {
+          // Slide along walls
+          const txX = Math.floor(nextX / 64);
+          const tyX = Math.floor(enemy.y / 64);
+          if (!isWall(getTileAt(state, txX, tyX))) {
+            enemy.x = nextX;
+          } else {
+            const txY = Math.floor(enemy.x / 64);
+            const tyY = Math.floor(nextY / 64);
+            if (!isWall(getTileAt(state, txY, tyY))) {
+              enemy.y = nextY;
+            }
+          }
+        }
+
       // Bot shooting
-      if (enemy.type === 'alchemist_bot' && pDist < 400) {
+      if (enemy.type === 'alchemist_bot' && dist < 400) {
         const lastShot = enemy.lastShot || 0;
         if (now - lastShot > 1000) {
-          const projId = generateId();
-          state.projectiles[projId] = {
-            id: projId,
-            x: enemy.x,
-            y: enemy.y,
-            vx: (dx / pDist) * 10,
-            vy: (dy / pDist) * 10,
-            ownerId: enemy.id,
-            life: 80,
-            element: enemy.element || 'void',
-            damage: 15
-          };
+          // Ability: Deploy buffing drone
+          if (Math.random() < 0.2) {
+            addFloatingText(state, enemy.x, enemy.y, 'DRONE!', '#facc15');
+            // Logic to buff nearby enemies
+            Object.values(state.enemies).forEach(otherEnemy => {
+              if (Math.hypot(otherEnemy.x - enemy.x, otherEnemy.y - enemy.y) < 200) {
+                otherEnemy.hp = Math.min(otherEnemy.maxHp, otherEnemy.hp + 20);
+              }
+            });
+          } else {
+            const projId = generateId();
+            state.projectiles[projId] = {
+              id: projId,
+              x: enemy.x,
+              y: enemy.y,
+              vx: (dx / dist) * 10,
+              vy: (dy / dist) * 10,
+              ownerId: enemy.id,
+              life: 80,
+              element: enemy.element || 'void',
+              damage: 15
+            };
+          }
           enemy.lastShot = now;
         }
       }
 
+      // Void creature ability: Black hole
+      if (enemy.type === 'void_creature' && dist < 300) {
+        const lastAbility = enemy.lastAbility || 0;
+        if (now - lastAbility > 3000) {
+          const id = generateId();
+          state.hazards[id] = {
+            id, x: enemy.x, y: enemy.y, type: 'black_hole', radius: 100, life: 300, maxLife: 300
+          };
+          enemy.lastAbility = now;
+        }
+      }
+
       // Melee damage to player
-      if (pDist < 30) {
+      if (dist < 30) {
         let damage = enemy.type === 'void_creature' ? 10 : 20;
         
         // Defense logic
@@ -557,18 +615,9 @@ export function updateGameState(
 
         if (closestPlayer.hp <= 0) {
           // Player death
-          const penalty = closestPlayer.pvePenalty;
-          const coinsLost = Math.floor(closestPlayer.coins * (penalty / 100));
-          closestPlayer.coins -= coinsLost;
-          
-          if (coinsLost > 0) {
-            dropLoot(state, closestPlayer.x, closestPlayer.y, coinsLost);
-          }
-
-          closestPlayer.hp = closestPlayer.maxHp;
-          closestPlayer.x = 0;
-          closestPlayer.y = 0;
-          addFloatingText(state, closestPlayer.x, closestPlayer.y - 30, 'Respawned', '#ffffff');
+          closestPlayer.isDead = true;
+          closestPlayer.hp = 0;
+          addFloatingText(state, closestPlayer.x, closestPlayer.y - 30, 'DEFEATED', '#ef4444');
         }
       }
     }
@@ -581,20 +630,8 @@ export function updateGameState(
     const p1 = state.projectiles[p1Id];
     if (!p1) continue;
 
-    const nextX = p1.x + p1.vx * dt * 60;
-    const nextY = p1.y + p1.vy * dt * 60;
-
-    // Projectile vs Wall collision
-    const tx = Math.floor(nextX / 64);
-    const ty = Math.floor(nextY / 64);
-    const tile = getTileAt(state, tx, ty);
-    if (isWall(tile)) {
-      delete state.projectiles[p1Id];
-      continue;
-    }
-
-    p1.x = nextX;
-    p1.y = nextY;
+    p1.x += p1.vx * dt * 60;
+    p1.y += p1.vy * dt * 60;
     p1.life -= dt * 60;
 
     if (p1.life <= 0) {
@@ -659,7 +696,7 @@ export function updateGameState(
             boss.hp -= dmg;
             addFloatingText(state, boss.x, boss.y - 40, `${dmg}`, getElementColor(state, p1.element));
           }
-          addImpactDecal(state, p1.x, p1.y, getElementColor(state, p1.element), 'impact');
+          addImpactDecal(state, p1.x, p1.y, getElementColor(state, p1.element), getDecalType(state, p1.element));
           delete state.projectiles[p1Id];
           clashed = true;
           break;
@@ -676,7 +713,7 @@ export function updateGameState(
           enemy.hp -= dmg;
           
           addFloatingText(state, enemy.x, enemy.y - 20, `${dmg}`, getElementColor(state, p1.element));
-          addImpactDecal(state, p1.x, p1.y, getElementColor(state, p1.element), getBaseType(state, p1.element) === 'fire' ? 'scorch' : getBaseType(state, p1.element) === 'water' ? 'ice' : 'impact');
+          addImpactDecal(state, p1.x, p1.y, getElementColor(state, p1.element), getDecalType(state, p1.element));
           
           if (enemy.hp <= 0) {
             dropLoot(state, enemy.x, enemy.y, enemy.coinsToDrop);
@@ -718,18 +755,9 @@ export function updateGameState(
           }
           
           if (player.hp <= 0) {
-            const penalty = player.pvePenalty;
-            const coinsLost = Math.floor(player.coins * (penalty / 100));
-            player.coins -= coinsLost;
-            
-            if (coinsLost > 0) {
-              dropLoot(state, player.x, player.y, coinsLost);
-            }
-
-            player.hp = player.maxHp;
-            player.x = 0;
-            player.y = 0;
-            addFloatingText(state, player.x, player.y - 30, 'Respawned', '#ffffff');
+            player.isDead = true;
+            player.hp = 0;
+            addFloatingText(state, player.x, player.y - 30, 'DEFEATED', '#ef4444');
           }
           
           delete state.projectiles[p1Id];
@@ -771,8 +799,8 @@ export function updateGameState(
             }
 
             player.hp = player.maxHp;
-            player.x = 0;
-            player.y = 0;
+            player.x = Math.random() * 500 - 250;
+            player.y = Math.random() * 500 - 250;
             addFloatingText(state, player.x, player.y - 30, 'Respawned', '#ffffff');
           }
           
@@ -814,45 +842,99 @@ export function updateGameState(
     }
   }
 
-  // 6. Process Hazards
-  const hazardCount = Object.keys(state.hazards).length;
-  if (hazardCount < 40 && Math.random() < 0.05 * dt * 60) {
-    spawnHazardCluster(state);
-  }
-  
-  for (const id in state.hazards) {
-    const h = state.hazards[id];
-    h.life -= dt * 60;
-    if (h.life <= 0) {
-      delete state.hazards[id];
-      continue;
+    // 6. Process Hazards
+    const hazardCount = Object.keys(state.hazards).length;
+    if (hazardCount < 40 && Math.random() < 0.05 * dt * 60) {
+      spawnHazardCluster(state);
     }
+    
+    for (const id in state.hazards) {
+      const h = state.hazards[id];
+      h.life -= dt * 60;
+      if (h.life <= 0) {
+        delete state.hazards[id];
+        continue;
+      }
 
-    // Effect on players
-    for (const pid in state.players) {
-      const p = state.players[pid];
-      const dist = Math.hypot(p.x - h.x, p.y - h.y);
-      if (dist < h.radius) {
-        if (h.type === 'lava') {
-          p.hp -= 0.2 * dt * 60;
-          if (Math.random() < 0.05 * dt * 60) addFloatingText(state, p.x, p.y, 'BURN', '#ef4444');
-        } else if (h.type === 'blizzard') {
-          p.speed *= 0.5;
-        } else if (h.type === 'vines') {
-          p.speed *= 0.2;
-        } else if (h.type === 'spikes') {
-          p.hp -= 1 * dt * 60;
-          if (Math.random() < 0.1 * dt * 60) addFloatingText(state, p.x, p.y, 'SPIKED', '#94a3b8');
+      // Effect on players
+      for (const pid in state.players) {
+        const p = state.players[pid];
+        const dist = Math.hypot(p.x - h.x, p.y - h.y);
+        if (dist < h.radius) {
+          if (h.type === 'lava') {
+            p.hp -= 0.2 * dt * 60;
+            if (Math.random() < 0.05 * dt * 60) addFloatingText(state, p.x, p.y, 'BURN', '#ef4444');
+          } else if (h.type === 'blizzard') {
+            p.speed *= 0.5;
+          } else if (h.type === 'vines') {
+            p.speed *= 0.2;
+          } else if (h.type === 'spikes') {
+            p.hp -= 1 * dt * 60;
+            if (Math.random() < 0.1 * dt * 60) addFloatingText(state, p.x, p.y, 'SPIKED', '#94a3b8');
+            
+            if (p.hp <= 0) {
+              // Player death
+              const penalty = p.pvePenalty;
+              const coinsLost = Math.floor(p.coins * (penalty / 100));
+              p.coins -= coinsLost;
+              
+              if (coinsLost > 0) {
+                dropLoot(state, p.x, p.y, coinsLost);
+              }
+
+              p.hp = p.maxHp;
+              p.x = Math.random() * 500 - 250;
+              p.y = Math.random() * 500 - 250;
+              addFloatingText(state, p.x, p.y - 30, 'Respawned', '#ffffff');
+            }
+          }
+        }
+      }
+
+      // Effect on enemies (Bosses immune)
+      for (const eid in state.enemies) {
+        const e = state.enemies[eid];
+        const dist = Math.hypot(e.x - h.x, e.y - h.y);
+        if (dist < h.radius) {
+          if (h.type === 'lava') {
+            e.hp -= 0.5 * dt * 60;
+            if (Math.random() < 0.05 * dt * 60) addFloatingText(state, e.x, e.y, 'BURN', '#ef4444');
+          } else if (h.type === 'blizzard') {
+            e.speed *= 0.5;
+          } else if (h.type === 'vines') {
+            e.speed *= 0.2;
+          } else if (h.type === 'spikes') {
+            e.hp -= 2 * dt * 60;
+            if (Math.random() < 0.1 * dt * 60) addFloatingText(state, e.x, e.y, 'SPIKED', '#94a3b8');
+          }
+
+          if (e.hp <= 0) {
+            dropLoot(state, e.x, e.y, e.coinsToDrop);
+            delete state.enemies[eid];
+          }
         }
       }
     }
-  }
 
   // 7. Process Bosses
   if (Math.random() < 0.0005 * dt * 60 && Object.keys(state.bosses).length === 0) spawnBoss(state);
   for (const id in state.bosses) {
     const b = state.bosses[id];
     
+    // Boss phases
+    const hpPercent = b.hp / b.maxHp;
+    if (hpPercent < 0.3) {
+      b.phase = 3;
+      b.speed = 2.5; // Faster
+    } else if (hpPercent < 0.6) {
+      b.phase = 2;
+      b.speed = 2.0;
+    } else {
+      b.phase = 1;
+      b.speed = 1.5;
+    }
+    
+    // Simple AI: Move towards closest player
     let closestP: Player | null = null;
     let minDist = Infinity;
     for (const pid in state.players) {
@@ -864,63 +946,44 @@ export function updateGameState(
       }
     }
 
-    let moveX = 0;
-    let moveY = 0;
-
-    if (b.intent && now - b.intent.timestamp < 3000) {
-      moveX = b.intent.dx;
-      moveY = b.intent.dy;
-    } else if (closestP) {
-      moveX = closestP.x - b.x;
-      moveY = closestP.y - b.y;
-    }
-
-    if (b.abilityCooldown > 0) b.abilityCooldown -= dt * 60;
-
-    const dist = Math.hypot(moveX, moveY);
-    if (dist > 0) {
-      const dx = (moveX / dist) * b.speed * dt * 60;
-      const dy = (moveY / dist) * b.speed * dt * 60;
-      
-      // Use player-like movement (sliding along walls)
-      const nextX = b.x + dx;
-      const nextY = b.y + dy;
-      
-      // Check X collision
-      const tileX = Math.floor(nextX / 64);
-      const tileY = Math.floor(b.y / 64);
-      const ttX = state.tiles?.[`${tileX},${tileY}`] || getTileAt(state, tileX, tileY);
-      if (!isWall(ttX)) {
-        b.x = nextX;
-      }
-      
-      // Check Y collision
-      const tileX2 = Math.floor(b.x / 64);
-      const tileY2 = Math.floor(nextY / 64);
-      const ttY = state.tiles?.[`${tileX2},${tileY2}`] || getTileAt(state, tileX2, tileY2);
-      if (!isWall(ttY)) {
-        b.y = nextY;
-      }
-    }
-
-    // Hazard collision
-    for (const hazard of Object.values(state.hazards)) {
-      const hDist = Math.hypot(b.x - hazard.x, b.y - hazard.y);
-      if (hDist < hazard.radius) {
-        b.hp -= 5 * dt; // Bosses take less damage from hazards
-        b.speed = Math.max(1, b.speed * 0.99);
-      }
-    }
-
     if (closestP) {
       const dx = closestP.x - b.x;
       const dy = closestP.y - b.y;
-      const pDist = Math.hypot(dx, dy);
+      const dist = Math.hypot(dx, dy);
       
+      if (b.abilityCooldown > 0) b.abilityCooldown -= dt * 60;
+
+      if (dist > 0) {
+        b.x += (dx / dist) * b.speed * dt * 60;
+        b.y += (dy / dist) * b.speed * dt * 60;
+      }
+
       // Boss abilities
       if (b.abilityCooldown <= 0) {
         const rand = Math.random();
-        if (rand < 0.5 && pDist < 200) {
+        
+        // Phase 1: Shield Bash, Ground Pound
+        // Phase 2: Adds Projectile Storm
+        // Phase 3: Adds Teleport
+        
+        if (b.phase >= 2 && rand < 0.3) {
+          // Projectile Storm
+          b.abilityCooldown = 180;
+          for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2;
+            const pId = generateId();
+            state.projectiles[pId] = {
+              id: pId, ownerId: b.id, x: b.x, y: b.y,
+              vx: Math.cos(angle) * 8, vy: Math.sin(angle) * 8,
+              element: 'void', damage: 15, life: 120
+            };
+          }
+        } else if (b.phase >= 3 && rand < 0.5) {
+          // Teleport
+          b.x = closestP.x + (Math.random() - 0.5) * 400;
+          b.y = closestP.y + (Math.random() - 0.5) * 400;
+          b.abilityCooldown = 120;
+        } else if (rand < 0.5 && dist < 200) {
           // Shield Bash
           b.abilityCooldown = 240; // 4 seconds
           closestP.stunned = 60; // 1 second
@@ -930,7 +993,7 @@ export function updateGameState(
           for (let i = 0; i < 10; i++) {
             addImpactDecal(state, b.x + (dx/dist)*50, b.y + (dy/dist)*50, '#94a3b8', 'impact');
           }
-        } else if (rand >= 0.5) {
+        } else {
           // Ground Pound
           b.abilityCooldown = 300; // 5 seconds
           addFloatingText(state, b.x, b.y - 100, "GROUND POUND!", "#facc15");
@@ -980,26 +1043,9 @@ export function updateGameState(
     if (d.life <= 0) delete state.impactDecals[id];
   }
 
-  // 9. Update Player Auras/Trails and Global Death Check
+  // 9. Update Player Auras/Trails
   for (const pid in state.players) {
     const p = state.players[pid];
-    
-    // Global death check (for hazards, boss melee, etc.)
-    if (p.hp <= 0) {
-      const penalty = p.pvePenalty;
-      const coinsLost = Math.floor(p.coins * (penalty / 100));
-      p.coins -= coinsLost;
-      
-      if (coinsLost > 0) {
-        dropLoot(state, p.x, p.y, coinsLost);
-      }
-
-      p.hp = p.maxHp;
-      p.x = 0;
-      p.y = 0;
-      addFloatingText(state, p.x, p.y - 30, 'Respawned', '#ffffff');
-    }
-
     if (p.coins > 5000) p.aura = '#facc15'; // Gold aura for rich players
     else if (p.coins > 2000) p.aura = '#60a5fa'; // Blue aura
     

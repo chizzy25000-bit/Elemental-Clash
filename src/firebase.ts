@@ -43,8 +43,21 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  let errorMessage = "Unknown Firestore error";
+  if (error instanceof Error) {
+    errorMessage = error.message;
+  } else if (typeof error === 'string') {
+    errorMessage = error;
+  } else if (error && typeof error === 'object') {
+    try {
+      errorMessage = (error as any).message || JSON.stringify(error);
+    } catch (e) {
+      errorMessage = "Firestore error object could not be stringified";
+    }
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,

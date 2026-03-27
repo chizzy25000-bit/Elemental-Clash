@@ -3,6 +3,9 @@ import { ElementType, Loadout, CustomElement } from '../shared';
 import { ELEMENT_COLORS } from '../gameLogic';
 import Tooltip from './Tooltip';
 
+import { requestAd, happyTime } from '../lib/crazygames';
+import { toast } from 'sonner';
+
 interface Props {
   coins: number;
   inventory: ElementType[];
@@ -270,7 +273,20 @@ export default function Builder({ coins, inventory, loadout, onBuy, onEquip, onC
                   </div>
                 );
               })}
-              <button className="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 mt-2">
+              <button 
+                onClick={() => {
+                  requestAd('rewarded', () => {
+                    const baseElements: ElementType[] = ['fire', 'water', 'earth', 'air'];
+                    const randomElement = baseElements[Math.floor(Math.random() * baseElements.length)];
+                    onBuy(randomElement);
+                    happyTime();
+                    toast.success(`Rewarded Ad Complete! You received a Wildcard Element: ${randomElement.toUpperCase()}!`, {
+                      duration: 5000,
+                    });
+                  });
+                }}
+                className="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 mt-2"
+              >
                 <span className="text-xl">🃏</span> Watch Ad for Wildcard Element
               </button>
             </div>
