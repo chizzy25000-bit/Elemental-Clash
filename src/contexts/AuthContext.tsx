@@ -19,44 +19,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isCrazyGames, setIsCrazyGames] = useState(false);
 
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-
     const init = async () => {
-      try {
-        const sdk = await initCrazyGames();
-        if (sdk) {
-          setIsCrazyGames(true);
-          const cgUser = await crazyGamesLogin();
-          if (cgUser) {
-            // Normalize CrazyGames user to have a 'uid' for Firestore sync
-            setUser({
-              ...cgUser,
-              uid: cgUser.userId,
-              displayName: cgUser.username || 'Player'
-            });
-            setLoading(false);
-            return;
-          }
-        }
-
-        unsubscribe = onAuthStateChanged(auth, (user) => {
-          if (!isCrazyGames) {
-            setUser(user);
-          }
+      const sdk = await initCrazyGames();
+      if (sdk) {
+        setIsCrazyGames(true);
+        const cgUser = await crazyGamesLogin();
+        if (cgUser && typeof cgUser.userId === 'string' && cgUser.userId.length > 0) {
+          // Normalize CrazyGames user to have a 'uid' for Firestore sync
+          setUser({
+            ...cgUser,
+            uid: cgUser.userId,
+            displayName: cgUser.username || 'Player'
+          });
           setLoading(false);
-        });
-      } catch (error) {
-        console.error('Auth Initialization Error:', error);
-        setLoading(false);
-        // Re-throw so ErrorBoundary can catch it if it's a critical failure
-        throw error instanceof Error ? error : new Error(JSON.stringify(error));
+          return;
+        }
       }
+
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (!isCrazyGames) {
+          setUser(user);
+        }
+        setLoading(false);
+      });
+      return unsubscribe;
     };
 
     init();
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
   }, [isCrazyGames]);
 
   const value = {

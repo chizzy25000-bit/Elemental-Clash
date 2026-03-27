@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from 'react';
-import { toast } from 'sonner';
 import { GameState, InputState, ElementType, Loadout } from '../shared';
 import { updateGameState, dropLoot } from '../gameLogic';
 import Renderer from './Renderer';
@@ -218,35 +217,19 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
 
   const handleReviveAd = () => {
     setAdLoading(true);
-    try {
-      requestAd('rewarded', () => {
-        handleRespawn(true);
-        setAdLoading(false);
-      }, (err) => {
-        console.error('Revive ad error:', err);
-        setAdLoading(false);
-        toast.error('Failed to load ad. Please try again.');
-      });
-    } catch (err) {
-      console.error('Revive ad request failed:', err);
+    requestAd('rewarded', () => {
+      handleRespawn(true);
       setAdLoading(false);
-      toast.error('Ad request failed.');
-    }
+    }, () => {
+      setAdLoading(false);
+    });
   };
 
   const handlePause = () => {
     if (isCrazyGames) {
-      try {
-        requestAd('midroll', () => {
-          setShowPause(true);
-        }, (err) => {
-          console.error('Midroll ad error:', err);
-          setShowPause(true); // Still show pause menu
-        });
-      } catch (err) {
-        console.error('Midroll ad request failed:', err);
+      requestAd('midroll', () => {
         setShowPause(true);
-      }
+      });
     } else {
       setShowPause(true);
     }
@@ -295,7 +278,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
       // Remove consumed elements
       if (consumedElements) {
         consumedElements.forEach(id => {
-          const index = player.inventory.indexOf(id);
+          const index = (player.inventory || []).indexOf(id);
           if (index !== -1) {
             player.inventory.splice(index, 1);
           }

@@ -11,7 +11,7 @@ export const FirebaseSync: React.FC = () => {
   const syncInProgress = useRef(false);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || typeof user.uid !== 'string' || user.uid.length === 0) return;
 
     const userDocRef = doc(db, 'users', user.uid);
 
@@ -67,7 +67,7 @@ export const FirebaseSync: React.FC = () => {
 
   // Listen for local changes to sync to cloud
   useEffect(() => {
-    if (!user) return;
+    if (!user || typeof user.uid !== 'string' || user.uid.length === 0) return;
 
     const syncToCloud = async () => {
       if (syncInProgress.current) return;
@@ -99,9 +99,7 @@ export const FirebaseSync: React.FC = () => {
     };
 
     const handleSyncRequest = () => {
-      syncToCloud().catch(err => {
-        console.error('Manual sync to cloud failed:', err);
-      });
+      syncToCloud();
     };
 
     window.addEventListener('sync_to_cloud', handleSyncRequest);
