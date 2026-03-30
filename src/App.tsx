@@ -14,7 +14,7 @@ interface World {
 }
 
 function AppContent() {
-  const { user, login, logout } = useAuth();
+  const { user, login, logout, isCrazyGames, linkCrazyGames } = useAuth();
   const { coins } = useCoins();
   const [mode, setMode] = useState<'menu' | 'sp_menu' | 'sp_play'>('menu');
   const [spReset, setSpReset] = useState(false);
@@ -66,7 +66,9 @@ function AppContent() {
             {user ? (
               <>
                 <div className="flex flex-col items-end">
-                  <span className="text-xs text-slate-400 font-bold uppercase tracking-wider leading-none mb-1">Account</span>
+                  <span className="text-xs text-slate-400 font-bold uppercase tracking-wider leading-none mb-1">
+                    {isCrazyGames ? 'CrazyGames Account' : 'Account'}
+                  </span>
                   <span className="text-sm font-black text-blue-400 leading-none truncate max-w-[120px]">{user.displayName || 'Player'}</span>
                 </div>
                 <button 
@@ -78,15 +80,37 @@ function AppContent() {
                 </button>
               </>
             ) : (
-              <button 
-                onClick={() => login()}
-                className="flex items-center gap-2 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold text-sm transition-colors"
-              >
-                <LogIn size={16} />
-                Login to Save
-              </button>
+              <div className="flex gap-2">
+                {isCrazyGames ? (
+                  <button 
+                    onClick={() => login()}
+                    className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-500 rounded-lg font-bold text-sm transition-colors shadow-[0_0_15px_rgba(234,88,12,0.3)]"
+                  >
+                    <LogIn size={16} />
+                    CrazyGames Login
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => login()}
+                    className="flex items-center gap-2 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold text-sm transition-colors"
+                  >
+                    <LogIn size={16} />
+                    Login to Save
+                  </button>
+                )}
+              </div>
             )}
           </div>
+
+          {/* Account Link Prompt (if guest on CrazyGames) */}
+          {isCrazyGames && !user && (
+            <button 
+              onClick={() => linkCrazyGames()}
+              className="bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/50 rounded-xl p-2 px-4 text-emerald-400 text-xs font-bold transition-all"
+            >
+              Link CrazyGames Account
+            </button>
+          )}
 
           {/* Coins */}
           <div className="bg-slate-800/80 backdrop-blur border border-slate-600 rounded-xl p-3 px-5 text-white shadow-lg flex items-center gap-3">

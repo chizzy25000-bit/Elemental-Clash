@@ -10,13 +10,19 @@ export interface CrazyGamesSDK {
   };
   user: {
     getUser: () => Promise<any>;
+    getUserToken: () => Promise<string>;
     getSystemInfo: () => any;
     showAuthPrompt: () => Promise<any>;
+    showAccountLinkPrompt: () => Promise<any>;
+    addAuthListener: (callback: (user: any) => void) => void;
+    removeAuthListener: (callback: (user: any) => void) => void;
   };
   game: {
     gameplayStart: () => void;
     gameplayStop: () => void;
     happyTime: () => void;
+    loadingStart: () => void;
+    loadingStop: () => void;
   };
 }
 
@@ -46,7 +52,7 @@ export const initCrazyGames = async () => {
 
 export const getCrazyGamesSDK = () => sdkInstance;
 
-export const requestAd = (type: 'midroll' | 'rewarded', onFinished: () => void, onError?: (err: string) => void) => {
+export const requestAd = (type: 'midroll' | 'rewarded', onStarted: () => void, onFinished: () => void, onError?: (err: string) => void) => {
   if (!sdkInstance) {
     console.warn('CrazyGames SDK not initialized, skipping ad.');
     onFinished(); // Fallback
@@ -55,6 +61,7 @@ export const requestAd = (type: 'midroll' | 'rewarded', onFinished: () => void, 
 
   try {
     sdkInstance.ad.requestAd(type, {
+      adStarted: onStarted,
       adFinished: onFinished,
       adError: (err) => {
         console.error('Ad error:', err);
@@ -73,19 +80,42 @@ export const crazyGamesLogin = async () => {
   if (!sdkInstance) return null;
   
   try {
-    const user = await sdkInstance.user.getUser();
-    if (user) {
-      console.log('CrazyGames user logged in:', user);
-      return user;
-    } else {
-      // Try to show auth prompt if not logged in?
-      // For "automatic login", we just try to get the user first.
-      return null;
+    const token = await sdkInstance.user.getUserToken();
+    if (token) {
+      const response = await fetch('/api/verify-crazygames-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log('CrazyGames user verified:', data.user);
+        return data.user;
+      }
     }
+    return null;
   } catch (error) {
     console.error('CrazyGames login error:', error);
     return null;
   }
+};
+
+export const showAuthPrompt = async () => {
+  if (!sdkInstance) return null;
+  return await sdkInstance.user.showAuthPrompt();
+};
+
+export const showAccountLinkPrompt = async () => {
+  if (!sdkInstance) return null;
+  return await sdkInstance.user.showAccountLinkPrompt();
+};
+
+export const addAuthListener = (callback: (user: any) => void) => {
+  if (sdkInstance) sdkInstance.user.addAuthListener(callback);
+};
+
+export const removeAuthListener = (callback: (user: any) => void) => {
+  if (sdkInstance) sdkInstance.user.removeAuthListener(callback);
 };
 
 export const gameplayStart = () => {
@@ -98,4 +128,12 @@ export const gameplayStop = () => {
 
 export const happyTime = () => {
   if (sdkInstance) sdkInstance.game.happyTime();
+};
+
+export const loadingStart = () => {
+  if (sdkInstance) sdkInstance.game.loadingStart();
+};
+
+export const loadingStop = () => {
+  if (sdkInstance) sdkInstance.game.loadingStop();
 };

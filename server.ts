@@ -29,6 +29,34 @@ async function startServer() {
   const rooms = new Map<string, Room>();
   const socketRooms = new Map<string, string>();
 
+  app.post("/api/verify-crazygames-token", express.json(), async (req, res) => {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token is required' });
+
+    try {
+      const jwt = await import('jsonwebtoken');
+      const fetch = (await import('node-fetch')).default;
+
+      // Fetch public key from CrazyGames
+      const publicKeyResponse = await fetch('https://sdk.crazygames.com/public-key.json');
+      const { publicKey } = await publicKeyResponse.json() as { publicKey: string };
+
+      // Verify token
+      const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] }) as any;
+      
+      res.json({ 
+        user: {
+          userId: decoded.userId,
+          username: decoded.username,
+          profilePicture: decoded.profilePicture
+        } 
+      });
+    } catch (error) {
+      console.error('Token verification failed:', error);
+      res.status(401).json({ error: 'Invalid token' });
+    }
+  });
+
   function generateRoomCode() {
     let code;
     do {

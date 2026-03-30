@@ -9,7 +9,7 @@ import AlchemyForge from '../components/AlchemyForge';
 import { CustomElement, getInventoryKey, getLoadoutKey, getCustomElementsKey } from '../shared';
 import { useAuth } from '../contexts/AuthContext';
 import { useCoins } from '../contexts/CoinContext';
-import { gameplayStart, gameplayStop, happyTime, requestAd } from '../lib/crazygames';
+import { gameplayStart, gameplayStop, happyTime, requestAd, loadingStart, loadingStop } from '../lib/crazygames';
 
 export default function SinglePlayer({ worldId, reset, onExit }: { worldId: string, reset?: boolean, onExit: () => void }) {
   const { user, isCrazyGames } = useAuth();
@@ -18,6 +18,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
   const [showBuilder, setShowBuilder] = useState(false);
   const [showForge, setShowForge] = useState(false);
   const [showPause, setShowPause] = useState(false);
+  const [isAdPlaying, setIsAdPlaying] = useState(false);
   const [adLoading, setAdLoading] = useState(false);
   const [gameState, setGameState] = useState<GameState>({ players: {}, projectiles: {}, enemies: {}, lootOrbs: {}, floatingTexts: {}, customElements: {}, hazards: {}, bosses: {}, impactDecals: {}, tiles: {} });
   const stateRef = useRef<GameState>({
@@ -46,6 +47,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
   const lastUltimatesRef = useRef(new Map<string, number>());
 
   useEffect(() => {
+    loadingStart();
     if (reset) {
       localStorage.removeItem(`elemental_clash_world_${worldId}`);
       
@@ -113,6 +115,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
         } catch(e) {}
       }
     }
+    loadingStop();
   }, [reset, worldId, user, coins]);
 
   useEffect(() => {
@@ -128,7 +131,7 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
     let lastTime = Date.now();
     const TICK_RATE = 1000 / 60;
     const intervalId = setInterval(() => {
-      if (showBuilder || showForge || showPause || stateRef.current.players['local']?.isDead) {
+      if (showBuilder || showForge || showPause || isAdPlaying || stateRef.current.players['local']?.isDead) {
         lastTime = Date.now(); // Reset lastTime when unpausing
         return; 
       }
@@ -218,9 +221,14 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
   const handleReviveAd = () => {
     setAdLoading(true);
     requestAd('rewarded', () => {
+      setIsAdPlaying(true);
+    }, () => {
+      setIsAdPlaying(false);
       handleRespawn(true);
       setAdLoading(false);
-    }, () => {
+    }, (err) => {
+      console.error('Ad error:', err);
+      setIsAdPlaying(false);
       setAdLoading(false);
     });
   };
@@ -228,6 +236,13 @@ export default function SinglePlayer({ worldId, reset, onExit }: { worldId: stri
   const handlePause = () => {
     if (isCrazyGames) {
       requestAd('midroll', () => {
+        setIsAdPlaying(true);
+      }, () => {
+        setIsAdPlaying(false);
+        setShowPause(true);
+      }, (err) => {
+        console.error('Ad error:', err);
+        setIsAdPlaying(false);
         setShowPause(true);
       });
     } else {

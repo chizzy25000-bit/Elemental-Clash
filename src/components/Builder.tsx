@@ -276,6 +276,8 @@ export default function Builder({ coins, inventory, loadout, onBuy, onEquip, onC
               <button 
                 onClick={() => {
                   requestAd('rewarded', () => {
+                    console.log('Ad started');
+                  }, () => {
                     const baseElements: ElementType[] = ['fire', 'water', 'earth', 'air'];
                     const randomElement = baseElements[Math.floor(Math.random() * baseElements.length)];
                     onBuy(randomElement);
