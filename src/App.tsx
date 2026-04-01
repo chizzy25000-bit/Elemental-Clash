@@ -98,19 +98,17 @@ function AppContent() {
                     Login to Save
                   </button>
                 )}
+                {isCrazyGames && (
+                  <button 
+                    onClick={() => linkCrazyGames()}
+                    className="bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/50 rounded-lg p-2 px-4 text-emerald-400 text-xs font-bold transition-all"
+                  >
+                    Link Account
+                  </button>
+                )}
               </div>
             )}
           </div>
-
-          {/* Account Link Prompt (if guest on CrazyGames) */}
-          {isCrazyGames && !user && (
-            <button 
-              onClick={() => linkCrazyGames()}
-              className="bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/50 rounded-xl p-2 px-4 text-emerald-400 text-xs font-bold transition-all"
-            >
-              Link CrazyGames Account
-            </button>
-          )}
 
           {/* Coins */}
           <div className="bg-slate-800/80 backdrop-blur border border-slate-600 rounded-xl p-3 px-5 text-white shadow-lg flex items-center gap-3">
